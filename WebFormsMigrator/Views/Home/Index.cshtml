@@ -1,0 +1,281 @@
+@model MigrationInputViewModel
+@{
+    ViewData["Title"] = "Modernize Web Forms";
+}
+
+<section class="hero">
+    <div class="eyebrow"><span class="pulse"></span> AI migration workspace</div>
+    <h1>Move beyond <span>postbacks.</span></h1>
+    <p>Turn ASP.NET Web Forms pages, controls, and code-behind into a clean ASP.NET Core MVC starting point—with an explicit migration plan you can review.</p>
+    <div class="hero-meta">
+        <span>Web Forms</span><b>→</b><span>ASP.NET Core MVC</span><b>→</b><span>Razor</span>
+    </div>
+</section>
+
+<form asp-action="Index" method="post" enctype="multipart/form-data" class="workspace" id="migration-form"
+      data-start-url="@Url.Action("Start", "Home")" data-status-url="@Url.Action("Status", "Home")"
+      data-dashboard-url="@Url.Action("Dashboard", "Home")">
+    <div asp-validation-summary="ModelOnly" class="validation"></div>
+    <section class="panel input-panel">
+        <div class="panel-heading">
+            <div><span class="step">01</span><h2>Source</h2></div>
+            <span class="mode @(Model.AiConfigured ? "online" : "local")">
+                <i></i>@(Model.AiConfigured ? Model.AiProviderName : "Local analyzer")
+            </span>
+        </div>
+
+        <div class="field-row">
+            <label asp-for="ProjectName">
+                <span>Project name</span>
+                <input asp-for="ProjectName" autocomplete="off" />
+                <span asp-validation-for="ProjectName" class="validation"></span>
+            </label>
+            <label asp-for="TargetFramework">
+                <span>Target</span>
+                <select asp-for="TargetFramework">
+                    <option value="net10.0">.NET 10</option>
+                    <option value="net8.0">.NET 8 LTS</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="source-tabs" role="tablist">
+            <button type="button" class="source-tab active" data-tab="upload">Upload files</button>
+            <button type="button" class="source-tab" data-tab="paste">Paste source</button>
+        </div>
+
+        <div class="source-pane active" data-pane="upload">
+            <label class="dropzone" for="Files">
+                <input asp-for="Files" type="file" multiple accept=".zip,.aspx,.ascx,.master,.cs,.vb,.config,.csproj,.vbproj,.asax,.resx,.ashx,.asmx,.svc,.sitemap" />
+                <span class="upload-icon">↥</span>
+                <strong>Drop your project ZIP here</strong>
+                <small>Whole .zip project, or individual Web Forms source files</small>
+                <span class="browse">Choose files</span>
+            </label>
+            <div id="file-list" class="file-list"></div>
+            <p class="upload-tip">Focused migration: upload one <code>.aspx</code> file together with its optional <code>.aspx.cs</code> or <code>.aspx.vb</code> code-behind.</p>
+            <span asp-validation-for="Files" class="validation"></span>
+        </div>
+        <div class="source-pane" data-pane="paste">
+            <textarea asp-for="PastedSource" rows="14" spellcheck="false" placeholder='<%@@ Page Language="C#" %>&#10;<asp:Content runat="server">...</asp:Content>'></textarea>
+        </div>
+
+        <button type="submit" class="primary-button" id="migrate-button">
+            <span class="button-label">Analyze &amp; migrate</span><span class="arrow">→</span>
+        </button>
+        <div class="migration-progress" id="migration-progress" hidden aria-live="polite">
+            <div class="progress-summary">
+                <span id="progress-stage">Preparing migration</span>
+                <strong id="progress-percent">0%</strong>
+            </div>
+            <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="progress-fill"></span>
+            </div>
+            <div class="progress-stages">
+                <span data-threshold="8">Upload</span>
+                <span data-threshold="20">Analyze</span>
+                <span data-threshold="48">Convert</span>
+                <span data-threshold="88">Validate</span>
+                <span data-threshold="100">Ready</span>
+            </div>
+            <p class="progress-error" id="progress-error" hidden></p>
+        </div>
+        @if (!Model.AiConfigured)
+        {
+            <p class="config-note">No key required for structural scaffolding. Configure Gemini, OpenAI, or OpenRouter for semantic migration.</p>
+        }
+    </section>
+
+    <aside class="panel guide-panel">
+        <div class="panel-heading"><div><span class="step">02</span><h2>What changes</h2></div></div>
+        <div class="mapping-list">
+            <div><code>Page_Load</code><span>GET action</span></div>
+            <div><code>Button_Click</code><span>POST action</span></div>
+            <div><code>&lt;asp:GridView&gt;</code><span>Razor partial</span></div>
+            <div><code>ViewState</code><span>View model</span></div>
+            <div><code>System.Web</code><span>Core services</span></div>
+        </div>
+        <div class="principle">
+            <span>Migration principle</span>
+            <p>Preserve behavior first. Improve architecture at explicit seams instead of hiding legacy assumptions.</p>
+        </div>
+    </aside>
+</form>
+
+@if (Model.Result is not null)
+{
+    var result = Model.Result;
+    <section class="results" id="results" data-result-id="@result.Id"
+             data-save-url="@Url.Action("SaveFile", "Home")"
+             data-regenerate-url="@Url.Action("RegenerateFile", "Home")">
+        <div class="result-title">
+            <div>
+                <div class="eyebrow"><span class="pulse"></span>@result.Mode</div>
+                <h2>Migration package ready</h2>
+                <p>@result.Summary</p>
+            </div>
+            <a asp-action="Download" asp-route-id="@result.Id" class="download-button">@(result.Build.Status == "passed" ? "Download verified ZIP ↓" : "Download review ZIP ↓")</a>
+        </div>
+
+        <div class="stats">
+            <div><strong>@result.Analysis.PageCount</strong><span>Pages</span></div>
+            <div><strong>@result.Analysis.ControlCount</strong><span>Server controls</span></div>
+            <div><strong>@result.Analysis.EventHandlerCount</strong><span>Event handlers</span></div>
+            <div><strong>@result.Files.Count</strong><span>Generated files</span></div>
+        </div>
+
+        <section class="build-report @result.Build.Status">
+            <div class="build-icon">@(result.Build.Status == "passed" ? "✓" : result.Build.Status is "failed" or "incomplete" ? "!" : "?")</div>
+            <div class="build-content">
+                <div class="build-heading">
+                    <div>
+                        <span>Automatic build verification</span>
+                        <h3>@(result.Build.Status == "passed" ? "Migration verified" : result.Build.Status == "failed" ? "Build needs repair" : result.Build.Status == "incomplete" ? "Semantic migration incomplete" : "Build check unavailable")</h3>
+                    </div>
+                    <code>@result.Build.DurationMilliseconds ms</code>
+                </div>
+                <p>@result.Build.Summary</p>
+                @if (result.Build.Diagnostics.Count > 0)
+                {
+                    <div class="diagnostics">
+                        @foreach (var diagnostic in result.Build.Diagnostics)
+                        {
+                            <button type="button" class="diagnostic" data-diagnostic-file="@diagnostic.File">
+                                <span class="diagnostic-code @diagnostic.Severity">@(string.IsNullOrEmpty(diagnostic.Code) ? diagnostic.Severity : diagnostic.Code)</span>
+                                <span class="diagnostic-message">@diagnostic.Message</span>
+                                @if (!string.IsNullOrEmpty(diagnostic.File))
+                                {
+                                    <code>@diagnostic.File@(diagnostic.Line is null ? "" : $":{diagnostic.Line}")</code>
+                                }
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+
+        <div class="result-grid">
+            <div class="result-column">
+                <h3>Migration plan</h3>
+                <ol class="steps">
+                    @foreach (var step in result.Steps) { <li>@step</li> }
+                </ol>
+                @if (result.Batches.Count > 0)
+                {
+                    <h3>Dependency batches</h3>
+                    <div class="batch-list">
+                        @foreach (var batch in result.Batches.OrderBy(batch => batch.Order))
+                        {
+                            <details class="batch-item">
+                                <summary>
+                                    <span class="batch-order">@batch.Order.ToString("00")</span>
+                                    <span class="batch-name">@batch.Name<small>@batch.SourceFiles.Count file(s) · @batch.SourceCharacters.ToString("N0") chars</small></span>
+                                    <span class="batch-status @batch.Status">@batch.Status.Replace('-', ' ')</span>
+                                </summary>
+                                <div class="batch-detail">
+                                    @if (batch.DependsOn.Count > 0)
+                                    {
+                                        <p>Depends on @batch.DependsOn.Count earlier batch(es)</p>
+                                    }
+                                    @foreach (var source in batch.SourceFiles)
+                                    {
+                                        <code>@source</code>
+                                    }
+                                </div>
+                            </details>
+                        }
+                    </div>
+                }
+                @if (result.Analysis.DetectedPatterns.Count > 0)
+                {
+                    <h3>Detected patterns</h3>
+                    <ul class="findings">
+                        @foreach (var item in result.Analysis.DetectedPatterns) { <li>@item</li> }
+                    </ul>
+                }
+                @if (result.Analysis.Warnings.Count > 0)
+                {
+                    <div class="warnings">
+                        <h3>Review required</h3>
+                        @foreach (var warning in result.Analysis.Warnings) { <p>@warning</p> }
+                    </div>
+                }
+            </div>
+            <div class="result-column files-column">
+                <div class="project-tree">
+                    <div class="tree-heading"><h3>Target project structure</h3><button type="button" class="copy-tree">Copy tree</button></div>
+                    <p>Place each generated file at the exact path shown below.</p>
+                    <pre><code id="project-tree-code">@ProjectTreeFormatter.Build(result.Files)</code></pre>
+                </div>
+                <h3 class="file-heading">Migrated code</h3>
+                <label class="file-picker" for="generated-file-picker">
+                    <span>Select a generated file</span>
+                    <select id="generated-file-picker">
+                    @for (var i = 0; i < result.Files.Count; i++)
+                    {
+                        <option value="file-@i">@result.Files[i].Path@(result.Files[i].IsBinary ? " (binary asset)" : "")</option>
+                    }
+                    </select>
+                </label>
+                @for (var i = 0; i < result.Files.Count; i++)
+                {
+                    var file = result.Files[i];
+                    var legacySource = result.Sources.FirstOrDefault(source => source.Path.Equals(file.SourcePath, StringComparison.OrdinalIgnoreCase));
+                    <div class="code-file @(i == 0 ? "active" : "")" id="file-@i">
+                        <div class="placement">
+                            <div><span>Legacy source</span><code>@file.SourcePath</code></div>
+                            <b>→</b>
+                            <div><span>Place migrated file at</span><code>@file.Path</code></div>
+                        </div>
+                        <div class="code-header">
+                            <span>@file.Path.Split('/').Last()</span>
+                            @if (!file.IsBinary)
+                            {
+                                <div class="editor-actions">
+                                    <button type="button" class="regenerate-button" @(legacySource is null || legacySource.IsBinary ? "disabled" : null)>Regenerate file</button>
+                                    <button type="button" class="save-button">Save &amp; verify</button>
+                                    <button type="button" class="copy-button">Copy code</button>
+                                </div>
+                            }
+                        </div>
+                        <div class="file-purpose">@file.Purpose</div>
+                        <div class="editor-status" aria-live="polite"></div>
+                        <div class="code-comparison">
+                            <section class="source-pane-code">
+                                <div class="pane-label">Legacy Web Forms source</div>
+                                @if (legacySource is not null && !legacySource.IsBinary)
+                                {
+                                    <pre><code>@legacySource.Content</code></pre>
+                                }
+                                else if (legacySource?.IsBinary == true)
+                                {
+                                    <div class="no-source">Binary source asset preserved losslessly. Preview is disabled.</div>
+                                }
+                                else
+                                {
+                                    <div class="no-source">This is new MVC infrastructure derived from the overall project.</div>
+                                }
+                            </section>
+                            <section class="target-pane-code">
+                                @if (file.IsBinary)
+                                {
+                                    <div class="pane-label">Preserved binary asset</div>
+                                    <div class="no-source">This asset is included in the downloaded ZIP at the exact path shown above.</div>
+                                }
+                                else
+                                {
+                                    <div class="pane-label">Editable migrated MVC code <span class="dirty-marker">Unsaved</span></div>
+                                    <textarea class="code-editor" spellcheck="false" data-path="@file.Path">@file.Content</textarea>
+                                }
+                            </section>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </section>
+}
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}
