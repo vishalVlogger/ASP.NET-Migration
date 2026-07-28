@@ -20,7 +20,7 @@ public sealed class MigrationJobRunner(
         var id = Guid.NewGuid().ToString("N");
         var workspace = workspaces.CreateWorkspace(id, files);
         jobs.Create(id, projectName, targetFramework, workspace);
-        jobs.SetBatches(id, planner.CreatePlan(files));
+        jobs.SetBatches(id, planner.CreatePlan(files.Where(file => !file.IsSkipped).ToList()));
         StartRun(id, projectName, targetFramework, files, previous: null, retryFailedOnly: false, forceLocal: false);
         return id;
     }
@@ -79,7 +79,7 @@ public sealed class MigrationJobRunner(
     {
         try
         {
-            jobs.Update(id, new MigrationProgress(12, $"Reading {files.Count} persistent source files"));
+            jobs.Update(id, new MigrationProgress(12, $"Reading {files.Count(file => !file.IsSkipped)} persistent source files"));
             await using var scope = scopeFactory.CreateAsyncScope();
             var migration = scope.ServiceProvider.GetRequiredService<IMigrationService>();
             var progress = new CallbackProgress(value => jobs.Update(id, value));

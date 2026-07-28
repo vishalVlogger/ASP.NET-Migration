@@ -4,9 +4,9 @@
 }
 
 <section class="hero">
-    <div class="eyebrow"><span class="pulse"></span> AI migration workspace</div>
-    <h1>Move beyond <span>postbacks.</span></h1>
-    <p>Turn ASP.NET Web Forms pages, controls, and code-behind into a clean ASP.NET Core MVC starting point—with an explicit migration plan you can review.</p>
+    <div class="eyebrow"><span class="pulse"></span> Compiler-guided migration workspace</div>
+    <h1>Modernize with <span>evidence.</span></h1>
+    <p>Convert an ASP.NET Web Forms project into reviewable ASP.NET Core MVC code, with batch-level progress, source traceability, and build diagnostics.</p>
     <div class="hero-meta">
         <span>Web Forms</span><b>→</b><span>ASP.NET Core MVC</span><b>→</b><span>Razor</span>
     </div>
@@ -14,7 +14,7 @@
 
 <form asp-action="Index" method="post" enctype="multipart/form-data" class="workspace" id="migration-form"
       data-start-url="@Url.Action("Start", "Home")" data-status-url="@Url.Action("Status", "Home")"
-      data-dashboard-url="@Url.Action("Dashboard", "Home")">
+      data-dashboard-url="@Url.Action("Dashboard", "Home")" data-cancel-url="@Url.Action("CancelJob", "Home")">
     <div asp-validation-summary="ModelOnly" class="validation"></div>
     <section class="panel input-panel">
         <div class="panel-heading">
@@ -39,12 +39,12 @@
             </label>
         </div>
 
-        <div class="source-tabs" role="tablist">
-            <button type="button" class="source-tab active" data-tab="upload">Upload files</button>
-            <button type="button" class="source-tab" data-tab="paste">Paste source</button>
+        <div class="source-tabs" role="tablist" aria-label="Source input method">
+            <button type="button" class="source-tab active" id="upload-tab" role="tab" aria-selected="true" aria-controls="upload-pane" data-tab="upload">Upload project</button>
+            <button type="button" class="source-tab" id="paste-tab" role="tab" aria-selected="false" aria-controls="paste-pane" data-tab="paste">Paste one page</button>
         </div>
 
-        <div class="source-pane active" data-pane="upload">
+        <div class="source-pane active" id="upload-pane" role="tabpanel" aria-labelledby="upload-tab" data-pane="upload">
             <label class="dropzone" for="Files">
                 <input asp-for="Files" type="file" multiple accept=".zip,.aspx,.ascx,.master,.cs,.vb,.config,.csproj,.vbproj,.asax,.resx,.ashx,.asmx,.svc,.sitemap" />
                 <span class="upload-icon">↥</span>
@@ -52,11 +52,18 @@
                 <small>Whole .zip project, or individual Web Forms source files</small>
                 <span class="browse">Choose files</span>
             </label>
+            <div class="file-selection" id="file-selection" hidden>
+                <div id="file-summary" class="file-summary" aria-live="polite"></div>
+                <button type="button" id="clear-files" class="text-button">Clear selection</button>
+            </div>
             <div id="file-list" class="file-list"></div>
             <p class="upload-tip">Focused migration: upload one <code>.aspx</code> file together with its optional <code>.aspx.cs</code> or <code>.aspx.vb</code> code-behind.</p>
+            <div class="upload-facts" aria-label="Upload limits">
+                <span>ZIP up to 25 MB</span><span>500 supported files</span><span>Checkpoints preserved</span>
+            </div>
             <span asp-validation-for="Files" class="validation"></span>
         </div>
-        <div class="source-pane" data-pane="paste">
+        <div class="source-pane" id="paste-pane" role="tabpanel" aria-labelledby="paste-tab" data-pane="paste" hidden>
             <textarea asp-for="PastedSource" rows="14" spellcheck="false" placeholder='<%@@ Page Language="C#" %>&#10;<asp:Content runat="server">...</asp:Content>'></textarea>
         </div>
 
@@ -79,6 +86,10 @@
                 <span data-threshold="100">Ready</span>
             </div>
             <p class="progress-error" id="progress-error" hidden></p>
+            <div class="progress-actions">
+                <a href="@Url.Action("Dashboard", "Home")">Open migration dashboard</a>
+                <button type="button" id="cancel-migration" class="text-button" hidden>Cancel and preserve checkpoint</button>
+            </div>
         </div>
         @if (!Model.AiConfigured)
         {
@@ -105,22 +116,44 @@
 @if (Model.Result is not null)
 {
     var result = Model.Result;
+    var aiBatches = result.Batches.Count(batch => batch.Status == "ai-migrated");
+    var fallbackBatches = result.Batches.Count(batch => batch.Status is "local-fallback" or "local-scaffolded");
+    var migratedSources = result.Coverage.Count(item => item.Status == "migrated");
+    var reviewedSources = result.Coverage.Count(item => item.Status == "reviewed");
+    var fallbackSources = result.Coverage.Count(item => item.Status == "fallback");
+    var skippedSources = result.Coverage.Count(item => item.Status == "skipped");
+    var pendingSources = result.Coverage.Count(item => item.Status == "pending");
+    var incompleteSources = fallbackSources + skippedSources + pendingSources;
+    var isReady = result.Build.Status == "passed" && fallbackBatches == 0 && incompleteSources == 0 &&
+                  result.Build.UnresolvedMigrationCount == 0 && result.Build.StructureIssueCount == 0;
     <section class="results" id="results" data-result-id="@result.Id"
              data-save-url="@Url.Action("SaveFile", "Home")"
              data-regenerate-url="@Url.Action("RegenerateFile", "Home")">
         <div class="result-title">
             <div>
                 <div class="eyebrow"><span class="pulse"></span>@result.Mode</div>
-                <h2>Migration package ready</h2>
+                <h2>@(isReady ? "Migration package ready" : "Migration package needs review")</h2>
                 <p>@result.Summary</p>
             </div>
-            <a asp-action="Download" asp-route-id="@result.Id" class="download-button">@(result.Build.Status == "passed" ? "Download verified ZIP ↓" : "Download review ZIP ↓")</a>
+            <a asp-action="Download" asp-route-id="@result.Id" class="download-button">@(isReady ? "Download verified ZIP ↓" : "Download review ZIP ↓")</a>
         </div>
 
-        <div class="stats">
+        <div class="readiness-banner @(isReady ? "ready" : "review")">
+            <div>
+                <span class="readiness-label">Release readiness</span>
+                <strong>@(isReady ? "Ready for your acceptance tests" : "Human review is still required")</strong>
+            </div>
+            <p>@(isReady
+                ? "Every batch was AI-migrated, the project builds, and no unresolved migration markers were detected."
+                : $"{incompleteSources} source file(s) remain incomplete, with {result.Build.UnresolvedMigrationCount} unresolved marker(s), {result.Build.StructureIssueCount} MVC issue(s), and {result.Build.ErrorCount} build error(s).")</p>
+        </div>
+
+        <div class="stats result-stats">
             <div><strong>@result.Analysis.PageCount</strong><span>Pages</span></div>
-            <div><strong>@result.Analysis.ControlCount</strong><span>Server controls</span></div>
-            <div><strong>@result.Analysis.EventHandlerCount</strong><span>Event handlers</span></div>
+            <div><strong>@aiBatches</strong><span>AI batches</span></div>
+            <div class="@(fallbackBatches > 0 ? "attention" : "")"><strong>@fallbackBatches</strong><span>Fallback batches</span></div>
+            <div class="@(result.Build.UnresolvedMigrationCount > 0 ? "attention" : "")"><strong>@result.Build.UnresolvedMigrationCount</strong><span>Unresolved markers</span></div>
+            <div class="@(result.Build.StructureIssueCount > 0 ? "attention" : "")"><strong>@result.Build.StructureIssueCount</strong><span>MVC structure issues</span></div>
             <div><strong>@result.Files.Count</strong><span>Generated files</span></div>
         </div>
 
@@ -173,6 +206,10 @@
                                     <span class="batch-status @batch.Status">@batch.Status.Replace('-', ' ')</span>
                                 </summary>
                                 <div class="batch-detail">
+                                    @if (!string.IsNullOrWhiteSpace(batch.ModelUsed))
+                                    {
+                                        <p>Model: <code>@batch.ModelUsed</code> · @batch.AttemptCount attempt(s)</p>
+                                    }
                                     @if (batch.DependsOn.Count > 0)
                                     {
                                         <p>Depends on @batch.DependsOn.Count earlier batch(es)</p>
@@ -200,6 +237,31 @@
                         @foreach (var warning in result.Analysis.Warnings) { <p>@warning</p> }
                     </div>
                 }
+                @if (result.Coverage.Count > 0)
+                {
+                    <details class="coverage-report" open="@(incompleteSources > 0 ? "open" : null)">
+                        <summary><span>Source coverage</span><b>@(migratedSources + reviewedSources)/@result.Coverage.Count complete</b></summary>
+                        <div class="coverage-summary">
+                            <span class="migrated">@migratedSources migrated</span>
+                            <span class="reviewed">@reviewedSources reviewed</span>
+                            <span class="fallback">@fallbackSources fallback</span>
+                            <span class="skipped">@skippedSources skipped</span>
+                            <span class="pending">@pendingSources pending</span>
+                        </div>
+                        <div class="coverage-list">
+                            @foreach (var item in result.Coverage.OrderBy(item => item.Path))
+                            {
+                                <div class="coverage-row">
+                                    <span class="coverage-status @item.Status">@item.Status</span>
+                                    <div><code>@item.Path</code>
+                                        @if (!string.IsNullOrWhiteSpace(item.Note)) { <small>@item.Note</small> }
+                                        @if (item.TargetFiles.Count > 0) { <small>→ @string.Join(", ", item.TargetFiles)</small> }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </details>
+                }
             </div>
             <div class="result-column files-column">
                 <div class="project-tree">
@@ -208,12 +270,16 @@
                     <pre><code id="project-tree-code">@ProjectTreeFormatter.Build(result.Files)</code></pre>
                 </div>
                 <h3 class="file-heading">Migrated code</h3>
+                <label class="file-search" for="generated-file-search">
+                    <span>Find a generated file</span>
+                    <input id="generated-file-search" type="search" placeholder="Controller, view, service or path…" autocomplete="off" />
+                </label>
                 <label class="file-picker" for="generated-file-picker">
                     <span>Select a generated file</span>
                     <select id="generated-file-picker">
                     @for (var i = 0; i < result.Files.Count; i++)
                     {
-                        <option value="file-@i">@result.Files[i].Path@(result.Files[i].IsBinary ? " (binary asset)" : "")</option>
+                        <option value="file-@i" data-path="@result.Files[i].Path">@result.Files[i].Path@(result.Files[i].IsBinary ? " (binary asset)" : "")</option>
                     }
                     </select>
                 </label>

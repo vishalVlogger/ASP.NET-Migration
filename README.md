@@ -8,6 +8,8 @@ It has two operating modes:
 - **AI migration:** when `OPENAI_API_KEY` is present, sends the supplied source to the OpenAI Responses API with a strict structured-output schema and generates a semantic vertical slice.
 - **Live progress:** asynchronous jobs report real analysis, conversion, validation, and packaging stages in the browser.
 - **Build verification:** generated projects are compiled automatically and compiler diagnostics link back to individual migrated files.
+- **Completion pipeline:** the actual generated `.csproj` is built, compiler failures can be sent through multiple AI repair rounds, and MVC structure is validated before a package is marked ready.
+- **Source coverage:** every ZIP entry is reported as migrated, fallback, skipped, pending, or explicitly reviewed, with source-to-target paths.
 - **Dependency-aware batches:** large projects are ordered into foundation, shared-code, user-control, and page batches; markup stays with its code-behind and failed AI batches fall back locally without losing successful work.
 - **Side-by-side editor:** compare legacy source with editable MVC code, save changes with automatic rebuild, or regenerate one selected file without rerunning the project.
 
@@ -59,11 +61,20 @@ dotnet user-secrets set "OpenRouter:Model" "openai/gpt-oss-20b:free"
 dotnet run
 ```
 
-OpenRouter batches default to a 180-second limit and 12,000 output tokens. A timeout causes the current and remaining batches to use local fallback instead of failing the migration job. Override these values with User Secrets when needed:
+For ordered model failover, configure the `Models` array. The legacy `OpenRouter:Model` value remains the final fallback for backward compatibility:
+
+```powershell
+dotnet user-secrets set "OpenRouter:Models:0" "inclusionai/ling-3.0-flash:free"
+dotnet user-secrets set "OpenRouter:Models:1" "qwen/qwen3-coder:free"
+dotnet user-secrets set "OpenRouter:Models:2" "nvidia/nemotron-3-ultra-550b-a55b:free"
+```
+
+The pool tries models in order for model-specific rate limits, timeouts, unavailable endpoints, and malformed responses. Authentication, credit, and account-wide daily-quota failures stop further AI requests and preserve remaining batches as local fallback. OpenRouter batches default to a 180-second per-model limit and 12,000 output tokens. Override completion and repair limits with User Secrets when needed:
 
 ```powershell
 dotnet user-secrets set "OpenRouter:TimeoutSeconds" "300"
 dotnet user-secrets set "OpenRouter:MaxOutputTokens" "16000"
+dotnet user-secrets set "AI:MaxRepairRounds" "2"
 ```
 
 With `AI__Provider=Auto` (the default), provider priority is OpenAI, Gemini, then OpenRouter. Set `AI__Provider` to `Gemini`, `OpenAI`, or `OpenRouter` for deterministic selection. Never store provider keys in `appsettings.json` or source control.
@@ -94,6 +105,10 @@ dotnet build .\WebFormsMigrator.slnx
 ## Architecture
 
 - `WebFormsAnalyzer` performs deterministic framework-pattern discovery.
-- `MigrationOrchestrator` selects AI or local generation and falls back safely if the API is unavailable.
+- `MigrationOrchestrator` runs dependency batches, source coverage, completion classification, and safe local fallback.
 - `OpenAiMigrationService` uses the Responses API and strict JSON Schema output.
-- `MigrationResultStore` holds short-lived generated packages for ZIP download.
+- `OpenRouterMigrationService` uses an ordered, failure-aware model pool.
+- `GeneratedProjectVerifier` builds the actual generated project rather than a synthetic verification project.
+- `AiCompilerRepairService` feeds compiler errors back to AI for bounded repair rounds.
+- `MvcStructureValidator` checks MVC registration, routes, controllers, views, services, configuration, and static assets.
+- `MigrationResultStore` persists generated packages and explicit file review state.

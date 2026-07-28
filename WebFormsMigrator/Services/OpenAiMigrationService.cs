@@ -79,7 +79,10 @@ public sealed class OpenAiMigrationService(HttpClient httpClient, IOptions<OpenA
         builder.AppendLine("Complete project source inventory:");
         foreach (var path in projectSourcePaths) builder.AppendLine($"- {path}");
         builder.AppendLine($"Static findings: {JsonSerializer.Serialize(analysis, JsonOptions)}");
-        builder.AppendLine("Generate only the target files owned by this batch. Keep paths compatible with previously generated dependency outputs. Do not regenerate unrelated project files. Keep TODO comments only where external dependencies or missing context make implementation impossible.");
+        if (batch.Kind == "compiler-repair")
+            builder.AppendLine("The FILE sections contain already-generated ASP.NET Core MVC target files. Repair the listed compiler diagnostics without changing their paths or removing behavior. Return every repaired target file and no unrelated files.");
+        else
+            builder.AppendLine("Generate only the target files owned by this batch. Keep paths compatible with previously generated dependency outputs. Do not regenerate unrelated project files. Keep TODO comments only where external dependencies or missing context make implementation impossible.");
 
         var dependencyCharacters = 0;
         foreach (var file in dependencyOutputs)

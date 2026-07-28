@@ -16,6 +16,7 @@ public sealed class HomeController(
     MigrationWorkspaceStorage workspaces,
     GeneratedProjectVerifier verifier,
     GeneratedOutputSanitizer sanitizer,
+    MvcStructureValidator mvcValidator,
     MigrationRepairService repairService,
     FileRegenerationService regeneration) : Controller
 {
@@ -238,7 +239,7 @@ public sealed class HomeController(
             sourceFiles.Add(await ReadSourceAsync(Path.GetFileName(file.FileName), extension, stream, cancellationToken));
         }
 
-        if (sourceFiles.Count == 0)
+        if (!sourceFiles.Any(file => !file.IsSkipped))
             ModelState.AddModelError(string.Empty, "Paste Web Forms source or choose at least one source file.");
         return sourceFiles;
     }
@@ -254,9 +255,22 @@ public sealed class HomeController(
         try
         {
             using var archive = new ZipArchive(upload.OpenReadStream(), ZipArchiveMode.Read, leaveOpen: false);
-            var candidates = archive.Entries
+            var entries = archive.Entries
                 .Where(entry => !string.IsNullOrEmpty(entry.Name))
                 .Select(entry => new { Entry = entry, Path = NormalizePath(entry.FullName) })
+                .ToList();
+            foreach (var item in entries.Where(item => item.Path is null))
+                sourceFiles.Add(new SourceFile($"unsafe-entry/{item.Entry.Name}", "", IsSkipped: true,
+                    SkipReason: "Archive path was unsafe and was not extracted."));
+            foreach (var item in entries.Where(item => item.Path is not null && IsIgnored(item.Path)))
+                sourceFiles.Add(new SourceFile(item.Path!, "", IsSkipped: true,
+                    SkipReason: "Generated, package, or source-control directory was excluded."));
+            foreach (var item in entries.Where(item => item.Path is not null && !IsIgnored(item.Path) &&
+                                                       !IsAcceptedExtension(Path.GetExtension(item.Path))))
+                sourceFiles.Add(new SourceFile(item.Path!, "", IsSkipped: true,
+                    SkipReason: $"Unsupported file type {Path.GetExtension(item.Path)}."));
+
+            var candidates = entries
                 .Where(item => item.Path is not null && !IsIgnored(item.Path))
                 .Where(item => IsAcceptedExtension(Path.GetExtension(item.Path!)))
                 .ToList();
@@ -360,12 +374,7 @@ public sealed class HomeController(
         var build = await verifier.VerifyAsync(result.ProjectName, result.TargetFramework, result.Files, cancellationToken);
         if (build.Status == "failed" && sanitizer.RepairDiagnostics(result.Files, build.Diagnostics) > 0)
             build = await verifier.VerifyAsync(result.ProjectName, result.TargetFramework, result.Files, cancellationToken);
-        build.UnresolvedMigrationCount = sanitizer.CountUnresolved(result.Files);
-        if (build.Status == "passed" && build.UnresolvedMigrationCount > 0)
-        {
-            build.Status = "incomplete";
-            build.Summary = $"Project compiles, but {build.UnresolvedMigrationCount} unresolved migration marker(s) require review.";
-        }
+        mvcValidator.ApplyCompletionStatus(result.ProjectName, result.Files, build, sanitizer.CountUnresolved(result.Files), result.Coverage);
         return build;
     }
 

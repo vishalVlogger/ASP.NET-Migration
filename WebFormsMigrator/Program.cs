@@ -35,10 +35,12 @@ builder.Services.AddHttpClient<OpenRouterMigrationService>(client =>
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
 builder.Services.AddScoped<AiProviderRouter>();
+builder.Services.AddScoped<AiCompilerRepairService>();
 builder.Services.AddSingleton<WebFormsAnalyzer>();
 builder.Services.AddSingleton<LocalMigrationGenerator>();
 builder.Services.AddSingleton<GeneratedProjectVerifier>();
 builder.Services.AddSingleton<GeneratedOutputSanitizer>();
+builder.Services.AddSingleton<MvcStructureValidator>();
 builder.Services.AddSingleton<ProjectBatchPlanner>();
 builder.Services.AddScoped<FileRegenerationService>();
 builder.Services.AddScoped<IMigrationService, MigrationOrchestrator>();

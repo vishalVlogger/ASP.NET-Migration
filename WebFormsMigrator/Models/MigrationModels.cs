@@ -21,7 +21,12 @@ public sealed class MigrationInputViewModel
     public string AiProviderName { get; set; } = "Local analyzer";
 }
 
-public sealed record SourceFile(string Path, string Content, bool IsBinary = false);
+public sealed record SourceFile(
+    string Path,
+    string Content,
+    bool IsBinary = false,
+    bool IsSkipped = false,
+    string? SkipReason = null);
 
 public sealed class MigrationAnalysis
 {
@@ -45,6 +50,19 @@ public sealed class MigrationResult
     public string ProjectName { get; set; } = "ModernizedApp";
     public string TargetFramework { get; set; } = "net10.0";
     public List<SourceFile> Sources { get; set; } = [];
+    public List<SourceMigrationCoverage> Coverage { get; set; } = [];
+    public string? ProviderModel { get; set; }
+    public int ProviderAttemptCount { get; set; }
+}
+
+public sealed class SourceMigrationCoverage
+{
+    public string Path { get; set; } = "";
+    public string Status { get; set; } = "pending";
+    public string? BatchId { get; set; }
+    public string? Note { get; set; }
+    public List<string> TargetFiles { get; set; } = [];
+    public List<string> ReviewedTargetFiles { get; set; } = [];
 }
 
 public sealed class MigrationBatchInfo
@@ -57,6 +75,8 @@ public sealed class MigrationBatchInfo
     public List<string> DependsOn { get; set; } = [];
     public int SourceCharacters { get; set; }
     public string Status { get; set; } = "pending";
+    public string? ModelUsed { get; set; }
+    public int AttemptCount { get; set; }
 }
 
 public sealed class GeneratedFile
@@ -76,6 +96,7 @@ public sealed class BuildVerification
     public int WarningCount { get; set; }
     public long DurationMilliseconds { get; set; }
     public int UnresolvedMigrationCount { get; set; }
+    public int StructureIssueCount { get; set; }
     public List<BuildDiagnostic> Diagnostics { get; set; } = [];
 }
 

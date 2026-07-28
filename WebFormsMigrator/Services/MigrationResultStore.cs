@@ -30,6 +30,21 @@ public sealed class MigrationResultStore(IMemoryCache cache, MigrationWorkspaceS
             var file = result.Files.FirstOrDefault(item => item.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
             if (file is null || file.IsBinary) return false;
             file.Content = content;
+            var coverage = result.Coverage.FirstOrDefault(item =>
+                item.Path.Equals(file.SourcePath, StringComparison.OrdinalIgnoreCase));
+            if (coverage is not null)
+            {
+                if (!coverage.TargetFiles.Contains(file.Path, StringComparer.OrdinalIgnoreCase))
+                    coverage.TargetFiles.Add(file.Path);
+                if (!coverage.ReviewedTargetFiles.Contains(file.Path, StringComparer.OrdinalIgnoreCase))
+                    coverage.ReviewedTargetFiles.Add(file.Path);
+                if (coverage.TargetFiles.Count > 0 && coverage.TargetFiles.All(target =>
+                        coverage.ReviewedTargetFiles.Contains(target, StringComparer.OrdinalIgnoreCase)))
+                {
+                    coverage.Status = "reviewed";
+                    coverage.Note = "Every generated target mapped to this source was saved and re-verified.";
+                }
+            }
             Set(result);
             return true;
         }

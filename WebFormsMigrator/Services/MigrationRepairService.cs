@@ -6,7 +6,8 @@ public sealed class MigrationRepairService(
     MigrationJobStore jobs,
     MigrationResultStore results,
     GeneratedOutputSanitizer sanitizer,
-    GeneratedProjectVerifier verifier)
+    GeneratedProjectVerifier verifier,
+    MvcStructureValidator mvcValidator)
 {
     public async Task<(bool Repaired, string Message)> RepairAsync(string jobId, CancellationToken cancellationToken)
     {
@@ -25,12 +26,7 @@ public sealed class MigrationRepairService(
                 build = await verifier.VerifyAsync(result.ProjectName, result.TargetFramework, result.Files, cancellationToken);
         }
 
-        build.UnresolvedMigrationCount = sanitizer.CountUnresolved(result.Files);
-        if (build.Status == "passed" && build.UnresolvedMigrationCount > 0)
-        {
-            build.Status = "incomplete";
-            build.Summary = $"Project compiles, but {build.UnresolvedMigrationCount} unresolved migration marker(s) require review.";
-        }
+        mvcValidator.ApplyCompletionStatus(result.ProjectName, result.Files, build, sanitizer.CountUnresolved(result.Files), result.Coverage);
         result.Build = build;
         results.Set(result, jobId);
         jobs.Checkpoint(jobId, result);

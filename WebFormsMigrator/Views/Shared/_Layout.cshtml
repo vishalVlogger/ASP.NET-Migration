@@ -10,11 +10,16 @@
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <header class="site-header">
         <a asp-controller="Home" asp-action="Index" class="brand"><span>{</span> reframe <span>}</span></a>
-        <div class="header-right"><span>ASP.NET modernization</span><a asp-controller="Home" asp-action="Dashboard">Migrations</a><a asp-controller="Home" asp-action="Index">New migration</a></div>
+        <nav class="header-right" aria-label="Primary navigation">
+            <span>ASP.NET modernization</span>
+            <a asp-controller="Home" asp-action="Dashboard">Migrations</a>
+            <a asp-controller="Home" asp-action="Index" class="header-cta">New migration</a>
+        </nav>
     </header>
-    <main>@RenderBody()</main>
+    <main id="main-content">@RenderBody()</main>
     <footer><span>Built for deliberate migrations.</span><span>Review generated code before production use.</span></footer>
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/jquery-validation/dist/jquery.validate.min.js"></script>

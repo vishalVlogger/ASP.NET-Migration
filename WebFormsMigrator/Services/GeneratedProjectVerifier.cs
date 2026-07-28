@@ -7,11 +7,6 @@ namespace WebFormsMigrator.Services;
 
 public sealed partial class GeneratedProjectVerifier(ILogger<GeneratedProjectVerifier> logger)
 {
-    private static readonly HashSet<string> CompilableExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".cs", ".cshtml", ".json", ".css", ".js"
-    };
-
     public async Task<BuildVerification> VerifyAsync(
         string projectName,
         string targetFramework,
@@ -25,43 +20,44 @@ public sealed partial class GeneratedProjectVerifier(ILogger<GeneratedProjectVer
         try
         {
             Directory.CreateDirectory(root);
-            foreach (var file in files.Where(file => CompilableExtensions.Contains(Path.GetExtension(file.Path))))
+            foreach (var file in files)
             {
                 var relativePath = RemoveProjectRoot(file.Path, projectName);
                 var destination = SafeDestination(root, relativePath);
                 if (destination is null) continue;
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                await File.WriteAllTextAsync(destination, file.Content, new UTF8Encoding(false), cancellationToken);
+                if (file.IsBinary)
+                    await File.WriteAllBytesAsync(destination, Convert.FromBase64String(file.Content), cancellationToken);
+                else
+                    await File.WriteAllTextAsync(destination, file.Content, new UTF8Encoding(false), cancellationToken);
             }
 
-            var safeFramework = targetFramework is "net8.0" or "net10.0" ? targetFramework : "net10.0";
-            var sqlClientReference = files.Any(file => !file.IsBinary &&
-                file.Content.Contains("Microsoft.Data.SqlClient", StringComparison.Ordinal))
-                ? """
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.1" />
-  </ItemGroup>
-"""
-                : "";
-            var projectFile = Path.Combine(root, "Verification.csproj");
-            await File.WriteAllTextAsync(projectFile, $"""
-<Project Sdk="Microsoft.NET.Sdk.Web">
-  <PropertyGroup>
-    <TargetFramework>{safeFramework}</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UseAppHost>false</UseAppHost>
-  </PropertyGroup>
-{sqlClientReference}
-</Project>
-""", cancellationToken);
+            var projectFiles = Directory.GetFiles(root, "*.csproj", SearchOption.AllDirectories);
+            var projectFile = projectFiles.FirstOrDefault(path =>
+                                  Path.GetFileNameWithoutExtension(path).Equals(projectName, StringComparison.OrdinalIgnoreCase))
+                              ?? (projectFiles.Length == 1 ? projectFiles[0] : null);
+            if (projectFile is null)
+            {
+                verification.Status = "failed";
+                verification.Summary = projectFiles.Length == 0
+                    ? "Generated package does not contain a buildable .csproj file."
+                    : "Generated package contains multiple projects and no unambiguous primary project.";
+                verification.ErrorCount = 1;
+                verification.Diagnostics.Add(new BuildDiagnostic
+                {
+                    Severity = "error",
+                    Code = "MVC001",
+                    Message = verification.Summary
+                });
+                return Finish(verification, timer);
+            }
 
-            using var process = CreateBuildProcess(projectFile, root);
+            using var process = CreateBuildProcess(projectFile, Path.GetDirectoryName(projectFile)!);
             process.Start();
             var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(90));
+            timeout.CancelAfter(TimeSpan.FromSeconds(180));
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
@@ -70,7 +66,7 @@ public sealed partial class GeneratedProjectVerifier(ILogger<GeneratedProjectVer
             {
                 process.Kill(entireProcessTree: true);
                 verification.Status = "failed";
-                verification.Summary = "Build verification exceeded the 90-second safety limit.";
+                verification.Summary = "Actual generated-project build exceeded the 180-second safety limit.";
                 return Finish(verification, timer);
             }
 
@@ -80,8 +76,8 @@ public sealed partial class GeneratedProjectVerifier(ILogger<GeneratedProjectVer
             verification.WarningCount = verification.Diagnostics.Count(item => item.Severity == "warning");
             verification.Status = process.ExitCode == 0 ? "passed" : "failed";
             verification.Summary = process.ExitCode == 0
-                ? $"Generated project compiled successfully with {verification.WarningCount} warning(s)."
-                : $"Generated project has {verification.ErrorCount} compiler error(s) and {verification.WarningCount} warning(s).";
+                ? $"Actual generated project compiled successfully with {verification.WarningCount} warning(s)."
+                : $"Actual generated project has {verification.ErrorCount} compiler error(s) and {verification.WarningCount} warning(s).";
             return Finish(verification, timer);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -114,6 +110,7 @@ public sealed partial class GeneratedProjectVerifier(ILogger<GeneratedProjectVer
         startInfo.ArgumentList.Add(projectFile);
         startInfo.ArgumentList.Add("--nologo");
         startInfo.ArgumentList.Add("--verbosity:minimal");
+        startInfo.ArgumentList.Add("-p:UseAppHost=false");
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         startInfo.Environment["DOTNET_NOLOGO"] = "1";
         return new Process { StartInfo = startInfo };

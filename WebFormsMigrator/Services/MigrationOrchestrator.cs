@@ -9,6 +9,8 @@ public sealed class MigrationOrchestrator(
     GeneratedOutputSanitizer sanitizer,
     ProjectBatchPlanner batchPlanner,
     AiProviderRouter aiProvider,
+    AiCompilerRepairService aiRepair,
+    MvcStructureValidator mvcValidator,
     ILogger<MigrationOrchestrator> logger) : IMigrationService
 {
     public bool IsAiConfigured => aiProvider.IsConfigured;
@@ -26,12 +28,14 @@ public sealed class MigrationOrchestrator(
         bool forceLocal = false)
     {
         progress?.Report(new(20, "Analyzing Web Forms architecture"));
-        var analysis = analyzer.Analyze(files);
+        var acceptedFiles = files.Where(file => !file.IsSkipped).ToList();
+        var analysis = analyzer.Analyze(acceptedFiles);
         progress?.Report(new(38, $"Mapped {analysis.ControlCount} server controls and {analysis.EventHandlerCount} event handlers"));
-        var baseline = localGenerator.Generate(projectName, targetFramework, files, analysis);
+        var baseline = localGenerator.Generate(projectName, targetFramework, acceptedFiles, analysis);
         sanitizer.Repair(baseline.Files);
         if (previous is not null) baseline.Id = previous.Id;
-        var batches = batchPlanner.CreatePlan(files);
+        var batches = batchPlanner.CreatePlan(acceptedFiles);
+        baseline.Coverage = CreateCoverage(files, batches, previous);
         if (IsAiConfigured && !forceLocal)
         {
             var result = new MigrationResult
@@ -39,8 +43,9 @@ public sealed class MigrationOrchestrator(
                 Id = previous?.Id ?? Guid.NewGuid().ToString("N"),
                 ProjectName = projectName,
                 TargetFramework = targetFramework,
-                Sources = files.ToList(),
-                Summary = $"Migrated {files.Count} source files in {batches.Count} dependency-ordered batch(es). Failed batches use the complete local structural fallback.",
+                Sources = acceptedFiles,
+                Coverage = CreateCoverage(files, batches, previous),
+                Summary = $"Migrated {acceptedFiles.Count} source files in {batches.Count} dependency-ordered batch(es). Failed batches use the complete local structural fallback.",
                 Analysis = analysis,
                 Mode = $"Batched AI · {aiProvider.DisplayName}",
                 Steps = baseline.Steps,
@@ -60,9 +65,12 @@ public sealed class MigrationOrchestrator(
                 {
                     var preserved = FilesForBatch(previous!.Files, batch);
                     MergeUniqueFiles(result.Files, preserved);
-                    outputsByBatch[batch.Id] = preserved;
-                    batchInfo.Status = "ai-migrated";
-                    checkpoint?.Invoke(result);
+                        outputsByBatch[batch.Id] = preserved;
+                        batchInfo.Status = "ai-migrated";
+                        batchInfo.ModelUsed = priorBatch.ModelUsed;
+                        batchInfo.AttemptCount = priorBatch.AttemptCount;
+                        UpdateCoverage(result, batch, "migrated", preserved);
+                        checkpoint?.Invoke(result);
                     continue;
                 }
                 var percent = 44 + (int)Math.Round(index * 40d / Math.Max(1, batches.Count));
@@ -86,6 +94,9 @@ public sealed class MigrationOrchestrator(
                         MergeUniqueFiles(result.Files, batchResult.Files);
                         outputsByBatch[batch.Id] = batchResult.Files;
                         batchInfo.Status = "ai-migrated";
+                        batchInfo.ModelUsed = batchResult.ProviderModel;
+                        batchInfo.AttemptCount = Math.Max(1, batchResult.ProviderAttemptCount);
+                        UpdateCoverage(result, batch, "migrated", batchResult.Files);
                         checkpoint?.Invoke(result);
                         continue;
                     }
@@ -105,20 +116,29 @@ public sealed class MigrationOrchestrator(
                 var fallbackFiles = FilesForBatch(baseline.Files, batch);
                 MergeUniqueFiles(result.Files, fallbackFiles);
                 outputsByBatch[batch.Id] = fallbackFiles;
+                UpdateCoverage(result, batch, "fallback", fallbackFiles,
+                    batchInfo.Status == "local-fallback" ? "AI conversion failed; local structural output was generated." : null);
                 checkpoint?.Invoke(result);
             }
 
             MergeMissingFiles(result, baseline);
+            RefreshCoverageTargets(result);
             progress?.Report(new(88, "Compiling dependency-batched migration"));
-            result.Build = await VerifyAndClassifyAsync(projectName, targetFramework, result.Files, cancellationToken);
+            result.Build = await VerifyAndClassifyAsync(projectName, targetFramework, result.Files, cancellationToken, result.Coverage);
+            if (result.Build.Status == "failed")
+                result.Build = await aiRepair.RepairAsync(result, result.Build, cancellationToken, progress, checkpoint);
             checkpoint?.Invoke(result);
             return result;
         }
 
         baseline.Batches = batches.Select(batch => batch.ToInfo("local-scaffolded")).ToList();
+        foreach (var batch in batches)
+            UpdateCoverage(baseline, batch, "fallback", FilesForBatch(baseline.Files, batch),
+                "Local structural migration; semantic review is required.");
+        RefreshCoverageTargets(baseline);
         progress?.Report(new(58, $"Scaffolding all {analysis.PageCount} Web Forms pages locally"));
         progress?.Report(new(88, "Compiling generated ASP.NET Core project"));
-        baseline.Build = await VerifyAndClassifyAsync(projectName, targetFramework, baseline.Files, cancellationToken);
+        baseline.Build = await VerifyAndClassifyAsync(projectName, targetFramework, baseline.Files, cancellationToken, baseline.Coverage);
         checkpoint?.Invoke(baseline);
         return baseline;
     }
@@ -127,30 +147,25 @@ public sealed class MigrationOrchestrator(
         string projectName,
         string targetFramework,
         IReadOnlyCollection<GeneratedFile> generatedFiles,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<SourceMigrationCoverage>? coverage = null)
     {
         sanitizer.Repair(generatedFiles);
         var build = await verifier.VerifyAsync(projectName, targetFramework, generatedFiles, cancellationToken);
         if (build.Status == "failed" && sanitizer.RepairDiagnostics(generatedFiles, build.Diagnostics) > 0)
             build = await verifier.VerifyAsync(projectName, targetFramework, generatedFiles, cancellationToken);
-        build.UnresolvedMigrationCount = sanitizer.CountUnresolved(generatedFiles);
-        if (build.Status == "passed" && build.UnresolvedMigrationCount > 0)
-        {
-            build.Status = "incomplete";
-            build.Summary = $"Project compiles, but {build.UnresolvedMigrationCount} unresolved migration marker(s) require review.";
-        }
+        mvcValidator.ApplyCompletionStatus(projectName, generatedFiles, build, sanitizer.CountUnresolved(generatedFiles), coverage);
         return build;
     }
 
     private static bool IsProviderUnavailable(Exception exception) =>
-        exception is TimeoutException or TaskCanceledException ||
-        exception.Message.Contains("400", StringComparison.OrdinalIgnoreCase) ||
+        exception is AiMigrationException { StopAllRequests: true } ||
         exception.Message.Contains("401", StringComparison.OrdinalIgnoreCase) ||
         exception.Message.Contains("402", StringComparison.OrdinalIgnoreCase) ||
         exception.Message.Contains("403", StringComparison.OrdinalIgnoreCase) ||
-        exception.Message.Contains("404", StringComparison.OrdinalIgnoreCase) ||
-        exception.Message.Contains("429", StringComparison.OrdinalIgnoreCase) ||
-        exception.Message.Contains("did not complete", StringComparison.OrdinalIgnoreCase);
+        exception.Message.Contains("free-models-per-day", StringComparison.OrdinalIgnoreCase) ||
+        exception.Message.Contains("daily limit", StringComparison.OrdinalIgnoreCase) ||
+        exception.Message.Contains("insufficient credits", StringComparison.OrdinalIgnoreCase);
 
     private static List<GeneratedFile> FilesForBatch(IReadOnlyCollection<GeneratedFile> baselineFiles, MigrationBatch batch)
     {
@@ -171,6 +186,73 @@ public sealed class MigrationOrchestrator(
     {
         var paths = result.Files.Select(file => file.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var file in baseline.Files.Where(file => !paths.Contains(file.Path))) result.Files.Add(file);
+    }
+
+    private static List<SourceMigrationCoverage> CreateCoverage(
+        IReadOnlyCollection<SourceFile> sources,
+        IReadOnlyCollection<MigrationBatch> batches,
+        MigrationResult? previous)
+    {
+        var prior = previous?.Coverage.ToDictionary(item => item.Path, StringComparer.OrdinalIgnoreCase)
+                    ?? new Dictionary<string, SourceMigrationCoverage>(StringComparer.OrdinalIgnoreCase);
+        return sources.Select(source =>
+        {
+            var batch = batches.FirstOrDefault(item => item.Files.Any(file =>
+                file.Path.Equals(source.Path, StringComparison.OrdinalIgnoreCase)));
+            prior.TryGetValue(source.Path, out var old);
+            return new SourceMigrationCoverage
+            {
+                Path = source.Path,
+                Status = source.IsSkipped ? "skipped" : old?.Status == "reviewed" ? "reviewed" : "pending",
+                BatchId = batch?.Id,
+                Note = source.IsSkipped ? source.SkipReason : old?.Note,
+                TargetFiles = old?.TargetFiles.ToList() ?? [],
+                ReviewedTargetFiles = old?.ReviewedTargetFiles.ToList() ?? []
+            };
+        }).OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static void UpdateCoverage(
+        MigrationResult result,
+        MigrationBatch batch,
+        string status,
+        IReadOnlyCollection<GeneratedFile> outputs,
+        string? note = null)
+    {
+        foreach (var source in batch.Files)
+        {
+            var coverage = result.Coverage.FirstOrDefault(item =>
+                item.Path.Equals(source.Path, StringComparison.OrdinalIgnoreCase));
+            if (coverage is null || coverage.Status == "reviewed") continue;
+            coverage.Status = status;
+            coverage.Note = note;
+            coverage.TargetFiles = outputs.Where(file =>
+                    file.SourcePath.Equals(source.Path, StringComparison.OrdinalIgnoreCase))
+                .Select(file => file.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            coverage.ReviewedTargetFiles = coverage.ReviewedTargetFiles
+                .Where(path => coverage.TargetFiles.Contains(path, StringComparer.OrdinalIgnoreCase)).ToList();
+        }
+    }
+
+    private static void RefreshCoverageTargets(MigrationResult result)
+    {
+        foreach (var coverage in result.Coverage.Where(item => item.Status != "skipped"))
+        {
+            coverage.TargetFiles = result.Files.Where(file =>
+                    file.SourcePath.Equals(coverage.Path, StringComparison.OrdinalIgnoreCase))
+                .Select(file => file.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (coverage.TargetFiles.Count > 0 && coverage.TargetFiles.All(path =>
+                    coverage.ReviewedTargetFiles.Contains(path, StringComparer.OrdinalIgnoreCase)))
+            {
+                coverage.Status = "reviewed";
+                coverage.Note = "Every generated target mapped to this source was saved and re-verified.";
+            }
+            if (coverage.TargetFiles.Count == 0 && coverage.Status == "migrated")
+            {
+                coverage.Status = "fallback";
+                coverage.Note = "No generated target file could be traced to this source.";
+            }
+        }
     }
 }
 

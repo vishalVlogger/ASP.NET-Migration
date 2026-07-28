@@ -33,12 +33,25 @@
     }
     else
     {
+        var readyCount = Model.Count(job => job.State == "complete");
+        var reviewCount = Model.Count(job => job.State is "needs-review" or "failed" or "interrupted");
+        var runningCount = Model.Count(job => job.State == "running");
+        <div class="dashboard-summary" aria-label="Migration summary">
+            <div><strong>@Model.Count</strong><span>Total migrations</span></div>
+            <div><strong>@runningCount</strong><span>Running</span></div>
+            <div><strong>@reviewCount</strong><span>Need attention</span></div>
+            <div><strong>@readyCount</strong><span>Ready</span></div>
+        </div>
+        <div class="dashboard-tools">
+            <label for="job-search"><span>Find migration</span><input id="job-search" type="search" placeholder="Search project or status…" /></label>
+            <span id="job-filter-count">Showing @Model.Count migration(s)</span>
+        </div>
         <div class="job-list">
             @foreach (var job in Model)
             {
                 var canResume = job.State is "failed" or "interrupted" or "cancelled" or "needs-review";
                 var stateLabel = job.State == "complete" ? "ready" : job.State == "needs-review" ? "review required" : job.State;
-                <article class="job-card state-@job.State">
+                <article class="job-card state-@job.State" data-job-search="@job.ProjectName @stateLabel @job.Stage">
                     <div class="job-main">
                         <div class="job-title-row">
                             <div>
@@ -48,7 +61,7 @@
                             <time datetime="@job.UpdatedAtUtc.ToString("O")">Updated @job.UpdatedAtUtc.ToLocalTime().ToString("dd MMM yyyy, hh:mm tt")</time>
                         </div>
                         <p class="job-stage">@job.Stage</p>
-                        <div class="job-progress" aria-label="@job.Percent percent complete">
+                        <div class="job-progress" role="progressbar" aria-label="@job.ProjectName migration progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@job.Percent">
                             <span style="width:@job.Percent%"></span>
                         </div>
                         <div class="job-metrics">

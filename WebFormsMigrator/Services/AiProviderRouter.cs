@@ -23,7 +23,9 @@ public sealed class AiProviderRouter(
     {
         "Gemini" => $"Gemini · {_gemini.Model}",
         "OpenAI" => $"OpenAI · {_openAi.Model}",
-        "OpenRouter" => $"OpenRouter · {_openRouter.Model}",
+        "OpenRouter" => _openRouter.OrderedModels().Count > 1
+            ? $"OpenRouter pool · {_openRouter.OrderedModels().Count} models"
+            : $"OpenRouter · {_openRouter.OrderedModels().FirstOrDefault() ?? "not configured"}",
         _ => "Local structural migration"
     };
 
@@ -36,7 +38,8 @@ public sealed class AiProviderRouter(
         MigrationAnalysis analysis,
         CancellationToken cancellationToken)
     {
-        return SelectProvider() switch
+        var provider = SelectProvider();
+        var result = provider switch
         {
             "Gemini" => await gemini.MigrateBatchAsync(projectName, targetFramework, batch, projectSourcePaths,
                 dependencyOutputs, analysis, GeminiKey()!, cancellationToken),
@@ -46,6 +49,14 @@ public sealed class AiProviderRouter(
                 dependencyOutputs, analysis, OpenRouterKey()!, cancellationToken),
             _ => throw new InvalidOperationException("No AI provider is configured.")
         };
+        result.ProviderModel ??= provider switch
+        {
+            "Gemini" => _gemini.Model,
+            "OpenAI" => _openAi.Model,
+            "OpenRouter" => _openRouter.OrderedModels().FirstOrDefault(),
+            _ => null
+        };
+        return result;
     }
 
     private string? SelectProvider()

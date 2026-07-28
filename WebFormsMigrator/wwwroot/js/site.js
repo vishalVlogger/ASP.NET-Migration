@@ -1,27 +1,58 @@
 document.querySelectorAll('.source-tab').forEach(button => {
     button.addEventListener('click', () => {
-        document.querySelectorAll('.source-tab').forEach(x => x.classList.remove('active'));
-        document.querySelectorAll('.source-pane').forEach(x => x.classList.remove('active'));
+        document.querySelectorAll('.source-tab').forEach(x => {
+            x.classList.remove('active');
+            x.setAttribute('aria-selected', 'false');
+        });
+        document.querySelectorAll('.source-pane').forEach(x => {
+            x.classList.remove('active');
+            x.hidden = true;
+        });
         button.classList.add('active');
-        document.querySelector(`[data-pane="${button.dataset.tab}"]`).classList.add('active');
+        button.setAttribute('aria-selected', 'true');
+        const pane = document.querySelector(`[data-pane="${button.dataset.tab}"]`);
+        pane.classList.add('active');
+        pane.hidden = false;
+    });
+    button.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        const tabs = [...document.querySelectorAll('.source-tab')];
+        const offset = event.key === 'ArrowRight' ? 1 : -1;
+        const target = tabs[(tabs.indexOf(button) + offset + tabs.length) % tabs.length];
+        target.focus();
+        target.click();
     });
 });
 
 const fileInput = document.querySelector('#Files');
 const dropzone = document.querySelector('.dropzone');
 const fileList = document.querySelector('#file-list');
+const fileSelection = document.querySelector('#file-selection');
+const fileSummary = document.querySelector('#file-summary');
 function renderFiles() {
     if (!fileInput || !fileList) return;
-    fileList.innerHTML = [...fileInput.files].map(file =>
+    const files = [...fileInput.files];
+    fileList.innerHTML = files.map(file =>
         `<div class="file-chip"><span>${escapeHtml(file.name)}</span><span>${formatBytes(file.size)}</span></div>`
     ).join('');
+    if (fileSelection) fileSelection.hidden = files.length === 0;
+    if (fileSummary) {
+        const total = files.reduce((sum, file) => sum + file.size, 0);
+        fileSummary.innerHTML = `<strong>${files.length}</strong> file${files.length === 1 ? '' : 's'} selected <span>${formatBytes(total)} total</span>`;
+    }
 }
 fileInput?.addEventListener('change', renderFiles);
+document.querySelector('#clear-files')?.addEventListener('click', () => {
+    fileInput.value = '';
+    renderFiles();
+    fileInput.focus();
+});
 ['dragenter', 'dragover'].forEach(name => dropzone?.addEventListener(name, event => { event.preventDefault(); dropzone.classList.add('dragging'); }));
 ['dragleave', 'drop'].forEach(name => dropzone?.addEventListener(name, event => { event.preventDefault(); dropzone.classList.remove('dragging'); }));
 dropzone?.addEventListener('drop', event => { fileInput.files = event.dataTransfer.files; renderFiles(); });
 
 const migrationForm = document.querySelector('#migration-form');
+let activeMigrationId = null;
 migrationForm?.addEventListener('submit', async event => {
     if (!window.fetch) return;
     event.preventDefault();
@@ -37,6 +68,8 @@ migrationForm?.addEventListener('submit', async event => {
     progressPanel.hidden = false;
     progressPanel.classList.remove('failed');
     document.querySelector('#progress-error').hidden = true;
+    activeMigrationId = null;
+    document.querySelector('#cancel-migration').hidden = true;
     updateProgress(4, 'Uploading and validating source');
 
     try {
@@ -45,9 +78,31 @@ migrationForm?.addEventListener('submit', async event => {
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.errors?.join(' ') || 'The migration could not be started.');
+        activeMigrationId = payload.jobId;
+        document.querySelector('#cancel-migration').hidden = false;
         await pollMigration(payload.jobId);
     } catch (error) {
         showProgressError(error.message || 'The migration could not be completed.');
+    }
+});
+
+document.querySelector('#cancel-migration')?.addEventListener('click', async event => {
+    if (!activeMigrationId || !window.confirm('Cancel this migration? Completed batch checkpoints will be preserved.')) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Cancelling…';
+    const form = new FormData();
+    form.append('__RequestVerificationToken', migrationForm.querySelector('input[name="__RequestVerificationToken"]').value);
+    form.append('id', activeMigrationId);
+    try {
+        const response = await fetch(migrationForm.dataset.cancelUrl, { method: 'POST', body: form });
+        if (!response.ok) throw new Error('Cancellation could not be requested.');
+        updateProgress(Number(document.querySelector('#progress-percent').textContent.replace('%', '')), 'Cancellation requested—preserving checkpoint');
+        button.hidden = true;
+    } catch (error) {
+        button.disabled = false;
+        button.textContent = 'Cancel and preserve checkpoint';
+        showProgressError(error.message);
     }
 });
 
@@ -58,6 +113,7 @@ async function pollMigration(jobId) {
         const job = await response.json();
         updateProgress(job.percent, job.stage);
         if (['failed', 'interrupted', 'cancelled'].includes(job.state)) {
+            document.querySelector('#cancel-migration').hidden = true;
             throw new Error(`${job.error || job.stage || 'Migration paused.'} Open the migration dashboard to resume.`);
         }
         if (job.state === 'complete') {
@@ -116,6 +172,19 @@ document.querySelector('#generated-file-picker')?.addEventListener('change', eve
     }
     document.querySelectorAll('.code-file').forEach(file => file.classList.remove('active'));
     document.querySelector(`#${event.target.value}`)?.classList.add('active');
+});
+
+document.querySelector('#generated-file-search')?.addEventListener('input', event => {
+    const picker = document.querySelector('#generated-file-picker');
+    const query = event.target.value.trim().toLowerCase();
+    if (!picker) return;
+    let visible = 0;
+    [...picker.options].forEach(option => {
+        const matches = !query || (option.dataset.path || option.text).toLowerCase().includes(query);
+        option.hidden = !matches;
+        if (matches) visible++;
+    });
+    event.target.classList.toggle('no-results', visible === 0);
 });
 
 document.querySelectorAll('.diagnostic').forEach(button => button.addEventListener('click', () => {
@@ -197,6 +266,22 @@ document.querySelector('.copy-tree')?.addEventListener('click', async event => {
 });
 
 function escapeHtml(value) { const div = document.createElement('div'); div.textContent = value; return div.innerHTML; }
-function formatBytes(bytes) { return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`; }
+function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+document.querySelector('#job-search')?.addEventListener('input', event => {
+    const query = event.target.value.trim().toLowerCase();
+    const cards = [...document.querySelectorAll('.job-card')];
+    let visible = 0;
+    cards.forEach(card => {
+        const matches = !query || card.dataset.jobSearch.toLowerCase().includes(query);
+        card.hidden = !matches;
+        if (matches) visible++;
+    });
+    document.querySelector('#job-filter-count').textContent = `Showing ${visible} migration(s)`;
+});
 
 if (document.querySelector('#results')) document.querySelector('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
