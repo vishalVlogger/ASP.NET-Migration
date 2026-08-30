@@ -15,5 +15,7 @@ public interface IMigrationService
         Action<MigrationResult>? checkpoint = null,
         MigrationResult? previous = null,
         bool retryFailedOnly = false,
-        bool forceLocal = false);
+        bool forceLocal = false,
+        ModernizationStrategy strategy = ModernizationStrategy.BalancedModernization,
+        DataAccessStrategy dataAccessStrategy = DataAccessStrategy.AnalyseOnly);
 }

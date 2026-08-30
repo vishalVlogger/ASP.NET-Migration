@@ -61,6 +61,9 @@ public sealed class AiProviderRouter(
 
     private string? SelectProvider()
     {
+        if (_provider.Provider.Equals("Disabled", StringComparison.OrdinalIgnoreCase) ||
+            _provider.Provider.Equals("None", StringComparison.OrdinalIgnoreCase) ||
+            _provider.Provider.Equals("Local", StringComparison.OrdinalIgnoreCase)) return null;
         if (_provider.Provider.Equals("Gemini", StringComparison.OrdinalIgnoreCase)) return HasGemini() ? "Gemini" : null;
         if (_provider.Provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase)) return HasOpenAi() ? "OpenAI" : null;
         if (_provider.Provider.Equals("OpenRouter", StringComparison.OrdinalIgnoreCase)) return HasOpenRouter() ? "OpenRouter" : null;

@@ -38,6 +38,10 @@
                 </select>
             </label>
         </div>
+        <div class="field-row strategy-row">
+            <label asp-for="Strategy"><span>Modernization strategy</span><select asp-for="Strategy"><option value="PreserveBehavior">Preserve Behavior</option><option value="BalancedModernization">Balanced Modernization</option><option value="AggressiveModernization">Aggressive Modernization</option></select></label>
+            <label asp-for="DataAccessStrategy"><span>Data access strategy</span><select asp-for="DataAccessStrategy"><option value="AnalyseOnly">Analyse Only</option><option value="PreserveAdoNet">Preserve ADO.NET</option><option value="Dapper">Dapper</option><option value="EfCore">EF Core</option></select></label>
+        </div>
 
         <div class="source-tabs" role="tablist" aria-label="Source input method">
             <button type="button" class="source-tab active" id="upload-tab" role="tab" aria-selected="true" aria-controls="upload-pane" data-tab="upload">Upload project</button>
@@ -93,7 +97,7 @@
         </div>
         @if (!Model.AiConfigured)
         {
-            <p class="config-note">No key required for structural scaffolding. Configure Gemini, OpenAI, or OpenRouter for semantic migration.</p>
+            <div class="config-note"><strong>AI Enhancement: Not configured</strong><br />AI-assisted semantic conversion is optional. Deterministic analysis and structural migration remain available.</div>
         }
     </section>
 
@@ -147,6 +151,8 @@
                 ? "Every batch was AI-migrated, the project builds, and no unresolved migration markers were detected."
                 : $"{incompleteSources} source file(s) remain incomplete, with {result.Build.UnresolvedMigrationCount} unresolved marker(s), {result.Build.StructureIssueCount} MVC issue(s), and {result.Build.ErrorCount} build error(s).")</p>
         </div>
+
+        <partial name="_AssessmentDashboard" model="result" />
 
         <div class="stats result-stats">
             <div><strong>@result.Analysis.PageCount</strong><span>Pages</span></div>

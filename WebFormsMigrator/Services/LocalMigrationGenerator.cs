@@ -8,7 +8,9 @@ namespace WebFormsMigrator.Services;
 
 public sealed partial class LocalMigrationGenerator
 {
-    public MigrationResult Generate(string projectName, string targetFramework, IReadOnlyCollection<SourceFile> sources, MigrationAnalysis analysis)
+    public MigrationResult Generate(string projectName, string targetFramework, IReadOnlyCollection<SourceFile> sources, MigrationAnalysis analysis,
+        ModernizationStrategy strategy = ModernizationStrategy.BalancedModernization,
+        DataAccessStrategy dataAccessStrategy = DataAccessStrategy.AnalyseOnly)
     {
         var pages = sources.Where(file => file.Path.EndsWith(".aspx", StringComparison.OrdinalIgnoreCase)).ToList();
         var standaloneCodeBehind = sources.Where(file =>
@@ -23,6 +25,8 @@ public sealed partial class LocalMigrationGenerator
         {
             ProjectName = projectName,
             TargetFramework = targetFramework,
+            Strategy = strategy,
+            DataAccessStrategy = dataAccessStrategy,
             Sources = sources.ToList(),
             Summary = $"Analyzed all {sources.Count} source files and scaffolded {pages.Count + standaloneCodeBehind.Count} page(s), {controls.Count} user control(s), and {masters.Count} master page(s). Select each generated file to see its exact destination and copyable code. Local mode performs structural conversion; configure OPENAI_API_KEY to translate business logic semantically.",
             Analysis = analysis,
@@ -35,6 +39,8 @@ public sealed partial class LocalMigrationGenerator
                 "Run characterization and integration tests before switching traffic."
             ]
         };
+        result.Steps.Insert(0, StrategyStep(strategy));
+        result.Steps.Add(DataStrategyStep(dataAccessStrategy));
 
         var defaultController = pages.Count > 0 ? ToTypeName(RemoveExtension(pages[0].Path, ".aspx")) : "Home";
         AddProjectShell(result, projectName, targetFramework, masters.FirstOrDefault(), defaultController, sources);
@@ -83,6 +89,21 @@ public sealed partial class LocalMigrationGenerator
             result.Analysis.Warnings.Add("No .aspx pages were found. Check whether the ZIP contains the project source rather than published binaries.");
         return result;
     }
+
+    private static string StrategyStep(ModernizationStrategy strategy) => strategy switch
+    {
+        ModernizationStrategy.PreserveBehavior => "Preserve behavior: retain proven database and application behavior behind compatibility-focused seams.",
+        ModernizationStrategy.AggressiveModernization => "Aggressive modernization: use layered services and identify state redesign candidates, with manual review gates.",
+        _ => "Balanced modernization: introduce dependency injection and modern configuration while preserving risky database logic."
+    };
+
+    private static string DataStrategyStep(DataAccessStrategy strategy) => strategy switch
+    {
+        DataAccessStrategy.PreserveAdoNet => "Preserve ADO.NET behind injected services; do not change SQL or stored procedures automatically.",
+        DataAccessStrategy.Dapper => "Classify simple parameterized queries as Dapper candidates; stored procedures and dynamic SQL require review.",
+        DataAccessStrategy.EfCore => "Classify EF Core candidates only; schema-dependent or complex SQL is not automatically rewritten.",
+        _ => "Data access remains analysis-only until a target strategy is approved."
+    };
 
     private static void AddProjectShell(
         MigrationResult result,
@@ -241,7 +262,7 @@ app.Run();
             result.Files.Add(new GeneratedFile
             {
                 Path = $"{projectName}/Migration/LegacyArtifacts/{StripCommonRoot(source.Path, commonRoot)}",
-                Content = source.Content,
+                Content = source.IsBinary ? source.Content : SensitiveDataMasker.Mask(source.Content),
                 IsBinary = source.IsBinary,
                 Purpose = $"Legacy artifact preserved for migration review from {source.Path}",
                 SourcePath = source.Path
@@ -262,7 +283,7 @@ app.Run();
             result.Files.Add(new GeneratedFile
             {
                 Path = $"{projectName}/Migration/LegacySource/{relative}.txt",
-                Content = source.Content,
+                Content = SensitiveDataMasker.Mask(source.Content),
                 Purpose = $"Immutable legacy source snapshot for traceability: {source.Path}",
                 SourcePath = source.Path
             });

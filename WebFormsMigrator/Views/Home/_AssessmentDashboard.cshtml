@@ -1,0 +1,38 @@
+@model WebFormsMigrator.Models.MigrationResult
+@using WebFormsMigrator.Models
+@if (Model.ReadinessReport is { } report)
+{
+    var score = report.ModernizationScore;
+    var high = report.Findings.Count(f => f.Severity == FindingSeverity.High);
+    var critical = report.Findings.Count(f => f.Severity == FindingSeverity.Critical);
+    <section class="assessment-dashboard" aria-labelledby="assessment-title">
+        <div class="assessment-heading">
+            <div><span class="eyebrow">Deterministic assessment</span><h2 id="assessment-title">Migration readiness</h2><p>Every value below is derived from concrete uploaded-source evidence.</p></div>
+            <div class="report-actions"><a asp-action="DownloadReport" asp-route-id="@Model.Id">Markdown report</a><a asp-action="DownloadReport" asp-route-id="@Model.Id" asp-route-format="json">JSON report</a></div>
+        </div>
+        <div class="assessment-kpis">
+            <article><span>Modernization score</span><strong>@score.Overall<small>/100</small></strong><em class="severity @score.Severity.ToString().ToLowerInvariant()">@score.Severity</em></article>
+            <article><span>Migration potential</span><strong>@report.AutomationPercentage%</strong><small>deterministic automation</small></article>
+            <article><span>Manual review</span><strong>@report.ManualReviewPercentage%</strong><small>@report.Effort.MinimumHours–@report.Effort.MaximumHours developer hours</small></article>
+            <article><span>High risk</span><strong>@report.HighRiskPercentage%</strong><small>@high high · @critical critical findings</small></article>
+        </div>
+        <div class="assessment-grid">
+            <article><h3>Project overview</h3><dl><div><dt>Framework</dt><dd>@report.DetectedFramework</dd></div><div><dt>Strategy</dt><dd>@report.Strategy</dd></div><div><dt>Data access</dt><dd>@report.DataAccessStrategy</dd></div><div><dt>Source coverage</dt><dd>@report.SourceFiles.TotalFiles accepted files</dd></div></dl></article>
+            <article><h3>Detected technology</h3><div class="technology-tags">@foreach (var item in report.DetectedTechnologyStack) { <span>@item</span> }</div><p>@report.SourceFiles.WebFormsPages pages · @report.SourceFiles.UserControls controls · @report.SourceFiles.MasterPages master pages · @report.SourceFiles.CodeBehindFiles code-behind files</p></article>
+            <article><h3>Planning estimate</h3><strong class="effort-range">@report.Effort.MinimumHours–@report.Effort.MaximumHours hours</strong><p>Estimated complexity: @report.Effort.Complexity. @report.Effort.Disclaimer</p></article>
+        </div>
+        <div class="complexity-grid">
+            @foreach (var category in score.Categories) { <div><span>@category.Name</span><strong>@category.Value</strong><div class="meter"><i style="width:@category.Value%"></i></div><small>@category.Meaning</small></div> }
+        </div>
+        <div class="assessment-columns">
+            <section><h3>Recommended next steps</h3><ol>@foreach (var recommendation in report.ModernizationRecommendations.Take(7)) { <li>@recommendation</li> }</ol></section>
+            <section><h3>Primary effort drivers</h3><ul>@foreach (var driver in report.Effort.PrimaryDrivers) { <li>@driver</li> }</ul></section>
+        </div>
+        <section class="finding-section"><h3>Explainable findings</h3><div class="finding-list">
+            @foreach (var finding in report.Findings)
+            {
+                <details class="finding-card @finding.Severity.ToString().ToLowerInvariant()"><summary><span><b>@finding.Title</b><small>@finding.Category · @finding.OccurrenceCount evidence match(es)</small></span><em>@finding.Severity</em></summary><div><p>@finding.Explanation</p><h4>Why it matters</h4><p>@finding.WhyItMatters</p><h4>Suggested modernization action</h4><p>@finding.Recommendation</p><h4>Affected files</h4><ul>@foreach (var evidence in finding.Evidence.Take(20)) { <li><code>@evidence.FilePath</code> — @evidence.MatchPattern (@evidence.Occurrences)</li> }</ul>@if (finding.Evidence.Count > 20) { <p>And @(finding.Evidence.Count - 20) more files in the downloadable report.</p> }</div></details>
+            }
+        </div></section>
+    </section>
+}

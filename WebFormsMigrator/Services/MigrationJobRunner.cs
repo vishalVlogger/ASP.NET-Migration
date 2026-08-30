@@ -15,13 +15,15 @@ public sealed class MigrationJobRunner(
 {
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new();
 
-    public string Start(string projectName, string targetFramework, IReadOnlyCollection<SourceFile> files)
+    public string Start(string projectName, string targetFramework, IReadOnlyCollection<SourceFile> files,
+        ModernizationStrategy strategy = ModernizationStrategy.BalancedModernization,
+        DataAccessStrategy dataAccessStrategy = DataAccessStrategy.AnalyseOnly)
     {
         var id = Guid.NewGuid().ToString("N");
         var workspace = workspaces.CreateWorkspace(id, files);
         jobs.Create(id, projectName, targetFramework, workspace);
         jobs.SetBatches(id, planner.CreatePlan(files.Where(file => !file.IsSkipped).ToList()));
-        StartRun(id, projectName, targetFramework, files, previous: null, retryFailedOnly: false, forceLocal: false);
+        StartRun(id, projectName, targetFramework, files, previous: null, retryFailedOnly: false, forceLocal: false, strategy, dataAccessStrategy);
         return id;
     }
 
@@ -38,7 +40,9 @@ public sealed class MigrationJobRunner(
         }
         MigrationResult? previous = null;
         if (!string.IsNullOrWhiteSpace(record.ResultId)) results.TryGet(record.ResultId, out previous);
-        StartRun(id, record.ProjectName, record.TargetFramework, sources, previous, retryFailedOnly: true, forceLocal);
+        StartRun(id, record.ProjectName, record.TargetFramework, sources, previous, retryFailedOnly: true, forceLocal,
+            previous?.Strategy ?? ModernizationStrategy.BalancedModernization,
+            previous?.DataAccessStrategy ?? DataAccessStrategy.AnalyseOnly);
         return true;
     }
 
@@ -56,7 +60,9 @@ public sealed class MigrationJobRunner(
         IReadOnlyCollection<SourceFile> files,
         MigrationResult? previous,
         bool retryFailedOnly,
-        bool forceLocal)
+        bool forceLocal,
+        ModernizationStrategy strategy,
+        DataAccessStrategy dataAccessStrategy)
     {
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.ApplicationStopping);
         if (!_active.TryAdd(id, cancellation))
@@ -64,7 +70,7 @@ public sealed class MigrationJobRunner(
             cancellation.Dispose();
             return;
         }
-        _ = RunAsync(id, projectName, targetFramework, files, previous, retryFailedOnly, forceLocal, cancellation);
+        _ = RunAsync(id, projectName, targetFramework, files, previous, retryFailedOnly, forceLocal, strategy, dataAccessStrategy, cancellation);
     }
 
     private async Task RunAsync(
@@ -75,6 +81,8 @@ public sealed class MigrationJobRunner(
         MigrationResult? previous,
         bool retryFailedOnly,
         bool forceLocal,
+        ModernizationStrategy strategy,
+        DataAccessStrategy dataAccessStrategy,
         CancellationTokenSource cancellation)
     {
         try
@@ -91,7 +99,7 @@ public sealed class MigrationJobRunner(
 
             var result = await migration.MigrateAsync(
                 projectName, targetFramework, files, cancellation.Token, progress,
-                SaveCheckpoint, previous, retryFailedOnly, forceLocal);
+                SaveCheckpoint, previous, retryFailedOnly, forceLocal, strategy, dataAccessStrategy);
             jobs.Update(id, new MigrationProgress(94, "Saving persistent migration package"));
             results.Set(result, id);
             jobs.Checkpoint(id, result);

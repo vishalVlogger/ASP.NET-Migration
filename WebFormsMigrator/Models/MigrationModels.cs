@@ -12,6 +12,12 @@ public sealed class MigrationInputViewModel
     [AllowedValues("net10.0", "net8.0", ErrorMessage = "Select a supported target framework.")]
     public string TargetFramework { get; set; } = "net10.0";
 
+    [Display(Name = "Modernization strategy")]
+    public ModernizationStrategy Strategy { get; set; } = ModernizationStrategy.BalancedModernization;
+
+    [Display(Name = "Data access strategy")]
+    public DataAccessStrategy DataAccessStrategy { get; set; } = DataAccessStrategy.AnalyseOnly;
+
     [Display(Name = "Web Forms source")]
     public string? PastedSource { get; set; }
 
@@ -53,6 +59,9 @@ public sealed class MigrationResult
     public List<SourceMigrationCoverage> Coverage { get; set; } = [];
     public string? ProviderModel { get; set; }
     public int ProviderAttemptCount { get; set; }
+    public ModernizationStrategy Strategy { get; set; } = ModernizationStrategy.BalancedModernization;
+    public DataAccessStrategy DataAccessStrategy { get; set; } = DataAccessStrategy.AnalyseOnly;
+    public MigrationReadinessReport? ReadinessReport { get; set; }
 }
 
 public sealed class SourceMigrationCoverage

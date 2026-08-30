@@ -11,6 +11,7 @@ public sealed class MigrationOrchestrator(
     AiProviderRouter aiProvider,
     AiCompilerRepairService aiRepair,
     MvcStructureValidator mvcValidator,
+    ModernizationAssessmentService assessmentService,
     ILogger<MigrationOrchestrator> logger) : IMigrationService
 {
     public bool IsAiConfigured => aiProvider.IsConfigured;
@@ -25,13 +26,16 @@ public sealed class MigrationOrchestrator(
         Action<MigrationResult>? checkpoint = null,
         MigrationResult? previous = null,
         bool retryFailedOnly = false,
-        bool forceLocal = false)
+        bool forceLocal = false,
+        ModernizationStrategy strategy = ModernizationStrategy.BalancedModernization,
+        DataAccessStrategy dataAccessStrategy = DataAccessStrategy.AnalyseOnly)
     {
         progress?.Report(new(20, "Analyzing Web Forms architecture"));
         var acceptedFiles = files.Where(file => !file.IsSkipped).ToList();
         var analysis = analyzer.Analyze(acceptedFiles);
         progress?.Report(new(38, $"Mapped {analysis.ControlCount} server controls and {analysis.EventHandlerCount} event handlers"));
-        var baseline = localGenerator.Generate(projectName, targetFramework, acceptedFiles, analysis);
+        var baseline = localGenerator.Generate(projectName, targetFramework, acceptedFiles, analysis, strategy, dataAccessStrategy);
+        baseline.ReadinessReport = assessmentService.Assess(projectName, acceptedFiles, strategy, dataAccessStrategy);
         sanitizer.Repair(baseline.Files);
         if (previous is not null) baseline.Id = previous.Id;
         var batches = batchPlanner.CreatePlan(acceptedFiles);
@@ -43,6 +47,9 @@ public sealed class MigrationOrchestrator(
                 Id = previous?.Id ?? Guid.NewGuid().ToString("N"),
                 ProjectName = projectName,
                 TargetFramework = targetFramework,
+                Strategy = strategy,
+                DataAccessStrategy = dataAccessStrategy,
+                ReadinessReport = baseline.ReadinessReport,
                 Sources = acceptedFiles,
                 Coverage = CreateCoverage(files, batches, previous),
                 Summary = $"Migrated {acceptedFiles.Count} source files in {batches.Count} dependency-ordered batch(es). Failed batches use the complete local structural fallback.",

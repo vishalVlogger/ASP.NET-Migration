@@ -1,5 +1,6 @@
 using WebFormsMigrator.Services;
 using WebFormsMigrator.Persistence;
+using WebFormsMigrator.Models;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -42,6 +43,11 @@ builder.Services.AddSingleton<GeneratedProjectVerifier>();
 builder.Services.AddSingleton<GeneratedOutputSanitizer>();
 builder.Services.AddSingleton<MvcStructureValidator>();
 builder.Services.AddSingleton<ProjectBatchPlanner>();
+builder.Services.AddSingleton<ModernizationScoreService>();
+builder.Services.AddSingleton<MigrationEffortEstimator>();
+builder.Services.AddSingleton<ModernizationAssessmentService>();
+builder.Services.AddSingleton<MigrationReportExporter>();
+builder.Services.AddSingleton<IFeatureEntitlementService, LocalFeatureEntitlementService>();
 builder.Services.AddScoped<FileRegenerationService>();
 builder.Services.AddScoped<IMigrationService, MigrationOrchestrator>();
 builder.Services.AddSingleton<MigrationResultStore>();

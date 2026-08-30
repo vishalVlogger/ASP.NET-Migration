@@ -18,7 +18,8 @@ public sealed class HomeController(
     GeneratedOutputSanitizer sanitizer,
     MvcStructureValidator mvcValidator,
     MigrationRepairService repairService,
-    FileRegenerationService regeneration) : Controller
+    FileRegenerationService regeneration,
+    MigrationReportExporter reportExporter) : Controller
 {
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -124,7 +125,8 @@ public sealed class HomeController(
 
         if (!ModelState.IsValid) return View(model);
 
-        model.Result = await migrationService.MigrateAsync(model.ProjectName, model.TargetFramework, sourceFiles, cancellationToken);
+        model.Result = await migrationService.MigrateAsync(model.ProjectName, model.TargetFramework, sourceFiles, cancellationToken,
+            strategy: model.Strategy, dataAccessStrategy: model.DataAccessStrategy);
         resultStore.Set(model.Result);
         return View(model);
     }
@@ -145,7 +147,7 @@ public sealed class HomeController(
             return BadRequest(new { errors });
         }
 
-        var jobId = jobRunner.Start(model.ProjectName, model.TargetFramework, sourceFiles);
+        var jobId = jobRunner.Start(model.ProjectName, model.TargetFramework, sourceFiles, model.Strategy, model.DataAccessStrategy);
         return Accepted(new { jobId });
     }
 
@@ -172,8 +174,19 @@ public sealed class HomeController(
         {
             AiConfigured = migrationService.IsAiConfigured,
             AiProviderName = migrationService.ProviderName,
-            Result = result
+            Result = result,
+            Strategy = result.Strategy,
+            DataAccessStrategy = result.DataAccessStrategy
         });
+    }
+
+    [HttpGet]
+    public IActionResult DownloadReport(string id, string format = "markdown")
+    {
+        if (!resultStore.TryGet(id, out var result) || result?.ReadinessReport is null) return NotFound();
+        if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
+            return File(reportExporter.ToJson(result), "application/json", $"reframe-report-{result.Id[..8]}.json");
+        return File(reportExporter.ToMarkdown(result), "text/markdown", $"reframe-report-{result.Id[..8]}.md");
     }
 
     [HttpPost]
