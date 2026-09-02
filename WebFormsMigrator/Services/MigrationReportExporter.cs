@@ -8,10 +8,17 @@ public sealed class MigrationReportExporter
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     public byte[] ToJson(MigrationResult result) => JsonSerializer.SerializeToUtf8Bytes(ExportModel(result), JsonOptions);
+    public byte[] ToJson(MigrationReadinessReport report) => JsonSerializer.SerializeToUtf8Bytes(report, JsonOptions);
+    public byte[] ToMarkdown(MigrationReadinessReport report) => ToMarkdownCore(report, null);
 
     public byte[] ToMarkdown(MigrationResult result)
     {
         var report = result.ReadinessReport ?? throw new InvalidOperationException("No readiness report is available.");
+        return ToMarkdownCore(report, result);
+    }
+
+    private static byte[] ToMarkdownCore(MigrationReadinessReport report, MigrationResult? result)
+    {
         var text = new StringBuilder()
             .AppendLine($"# {report.ProjectName} migration readiness report").AppendLine()
             .AppendLine($"Generated: {report.GeneratedTimestampUtc:O}").AppendLine()
@@ -24,8 +31,11 @@ public sealed class MigrationReportExporter
             .AppendLine($"- Recommendation: {report.ModernizationRecommendations.FirstOrDefault()}").AppendLine()
             .AppendLine("## Major risks and manual review items").AppendLine();
         foreach (var finding in report.Findings) text.AppendLine($"### {finding.Title} — {finding.Severity}").AppendLine(finding.Explanation).AppendLine($"Why it matters: {finding.WhyItMatters}").AppendLine($"Action: {finding.Recommendation}").AppendLine($"Affected files: {string.Join(", ", finding.Evidence.Select(e => e.FilePath))}").AppendLine();
-        text.AppendLine("## Generated migration files summary").AppendLine().AppendLine($"{result.Files.Count} generated files; build status: {result.Build.Status}.");
-        foreach (var file in result.Files) text.AppendLine($"- `{file.Path}` — {file.Purpose}");
+        if (result is not null)
+        {
+            text.AppendLine("## Generated migration files summary").AppendLine().AppendLine($"{result.Files.Count} generated files; build status: {result.Build.Status}.");
+            foreach (var file in result.Files) text.AppendLine($"- `{file.Path}` — {file.Purpose}");
+        }
         return Encoding.UTF8.GetBytes(text.ToString());
     }
 

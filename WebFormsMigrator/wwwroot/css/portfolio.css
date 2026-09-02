@@ -1,0 +1,5 @@
+.project-actions,.repository-strip{display:flex;flex-wrap:wrap;gap:.6rem;margin:0 0 1rem;align-items:center}
+.project-actions a{color:inherit;padding:.45rem .6rem;border-bottom:1px solid currentColor;font:600 10px "DM Mono",monospace;text-transform:uppercase;text-decoration:none}
+.repository-strip{padding:.8rem 1rem;border:1px solid #d6d2c5;background:#faf9f3;font:10px "DM Mono",monospace}
+.repository-strip span{padding-right:.7rem;border-right:1px solid #d6d2c5}.repository-strip span:last-child{border:0}
+.source-status{padding:.7rem 1rem;margin-bottom:1rem;border-left:4px solid #8aae16;background:#f1f6dc;font:10px "DM Mono",monospace}.source-status.changed{border-color:#ff633f;background:#fff0e8}.source-status code{float:right}

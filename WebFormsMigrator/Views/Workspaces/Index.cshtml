@@ -1,0 +1,9 @@
+@model IReadOnlyCollection<Workspace>
+@{ ViewData["Title"] = "Workspaces"; var archived = ViewBag.Archived == true; }
+<section class="dashboard-shell portfolio-shell">
+  <nav class="breadcrumbs"><a asp-controller="Home" asp-action="Index">Home</a><span>/</span><b>Workspaces</b></nav>
+  <div class="dashboard-heading"><div><span class="eyebrow">Persistent portfolio</span><h1>@(archived ? "Archived workspaces" : "Workspaces")</h1><p>Group modernization projects and retain their assessments, migration runs, and reports.</p></div><a asp-action="Create" class="download-button">Create workspace →</a></div>
+  <div class="filter-links"><a asp-action="Index" class="@(!archived ? "active" : "")">Active</a><a asp-action="Index" asp-route-archived="true" class="@(archived ? "active" : "")">Archived</a></div>
+  @if (Model.Count == 0) { <div class="empty-dashboard"><h2>No @(archived ? "archived" : "active") workspaces</h2><p>Create a workspace to begin organizing modernization projects.</p></div> }
+  <div class="portfolio-cards">@foreach (var item in Model.Where(item => item.IsArchived == archived)) { <article class="portfolio-card"><span class="status-badge">@(item.IsArchived ? "Archived" : "Active")</span><h2><a asp-action="Details" asp-route-id="@item.Id">@item.Name</a></h2><p>@(string.IsNullOrWhiteSpace(item.Description) ? "No description yet." : item.Description)</p><small>Updated @item.UpdatedAtUtc.ToLocalTime().ToString("dd MMM yyyy, hh:mm tt")</small><div class="card-actions"><a asp-action="Details" asp-route-id="@item.Id">Open workspace</a>@if (item.IsArchived) { <form asp-action="Restore" asp-route-id="@item.Id" method="post"><button>Restore</button></form> }</div></article> }</div>
+</section>

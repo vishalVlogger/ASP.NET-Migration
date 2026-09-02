@@ -27,6 +27,8 @@ public sealed class StartupTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.True(response.IsSuccessStatusCode, html);
         Assert.Contains("AI Enhancement: Not configured", html);
         Assert.Contains("Deterministic analysis", html);
+        Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/Workspaces")).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/Projects/Create")).StatusCode);
     }
 
     [Fact]

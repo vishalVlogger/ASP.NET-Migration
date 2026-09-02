@@ -15,6 +15,8 @@ It has two operating modes:
 
 Implemented product capabilities include deterministic modernization analysis, explainable 0–100 readiness scoring, risk and dependency detection, strategy-aware local migration, source coverage, engineering-effort ranges, compile verification, and Markdown/JSON technical reports. The dashboard exposes the exact affected files and named source pattern behind every finding without displaying uploaded connection-string values.
 
+Reframe also provides persistent local workspaces and projects. Every assessment is stored as an immutable, secret-safe snapshot; migrations link back to the exact assessment and source fingerprint that produced them. Project dashboards show trend, outstanding risk, activity, assessment history, comparisons, and migration history.
+
 > Screenshot placeholder: project assessment dashboard showing readiness score, automation potential, complexity categories, risks, and evidence.
 
 ## Run
@@ -91,6 +93,40 @@ For focused review, upload one `.aspx` page with its optional code-behind. The r
 
 Without any provider key, Reframe starts normally and provides project assessment, scoring, strategy selection, structural migration, build verification, reports, and the dashboard. Local rules cannot prove the semantics of arbitrary business logic, database behavior, third-party controls, or application-specific state; those sections are explicitly marked for review. Configure Gemini, OpenAI, or OpenRouter only when semantic code-behind assistance is wanted. AI output is merged with the complete local baseline so every source artifact remains accounted for.
 
+## Product workflow
+
+```text
+Create Workspace
+↓
+Create Project
+↓
+Upload ZIP / GitHub Import
+↓
+Assess
+↓
+Review Risks
+↓
+Improve Source
+↓
+Re-Assess
+↓
+Compare
+↓
+Migrate
+↓
+Validate
+↓
+Download
+```
+
+Workspaces and projects can be archived and restored without deleting assessment or migration history. Project lists support server-side name search, source/risk filters, active/archived views, and sorting.
+
+## Public GitHub import
+
+Project onboarding accepts public repository URLs strictly in the form `https://github.com/{owner}/{repository}` with an optional branch. Reframe resolves the default branch when omitted, records the branch and commit SHA when available, downloads the archive through fixed GitHub API endpoints, and feeds accepted files into the same deterministic assessment pipeline as uploads.
+
+GitHub import does not support private repositories, OAuth, arbitrary Git hosts, generic URLs, Git submodules, or Git LFS content. Anonymous GitHub API limits apply; a rate-limit response is surfaced as a friendly prompt to upload a ZIP or retry later. Archives are limited to 25 MB compressed, 50 MB expanded, 500 accepted files, bounded individual files, safe compression ratios, approved extensions, and traversal-safe paths.
+
 ## Safety and limits
 
 - API keys are read from configuration or the environment and are never submitted by the browser.
@@ -99,6 +135,7 @@ Without any provider key, Reframe starts normally and provides project assessmen
 - Generated ZIP paths are normalized to prevent path traversal.
 - Generated-project verification confines every destination to its temporary workspace, and report exports include evidence labels rather than raw source excerpts.
 - Uploaded connection-string values are converted to named, secret-free placeholders; passwords are not rendered in assessments or technical report exports.
+- Source fingerprints use SHA-256 over normalized accepted paths and contents; timestamps and excluded build/package/source-control directories do not affect them.
 - Migration results expire from the in-memory cache after one hour.
 - Generated code is a reviewable starting point; validate authorization, persistence, and business behavior before production use.
 
@@ -122,8 +159,17 @@ dotnet build .\WebFormsMigrator.slnx
 - `AiCompilerRepairService` feeds compiler errors back to AI for bounded repair rounds.
 - `MvcStructureValidator` checks MVC registration, routes, controllers, views, services, configuration, and static assets.
 - `MigrationResultStore` persists generated packages and explicit file review state.
+- `ModernizationPortfolioStore` persists workspaces, projects, immutable assessments, linked migration runs, and lightweight activity records in the existing SQLite database.
+- `SourceFingerprintService` provides stable source-change detection; `AssessmentComparisonService` diffs rule-and-path identities as new, resolved, changed, or unchanged.
+- `GitHubRepositoryImportService` validates public GitHub identity and delegates transport to a mockable client before using the shared archive reader.
 
 The lightweight domain also defines `Workspace`, `ModernizationProject`, `MigrationRun`, `Assessment`, and `MigrationArtifact` concepts for future multi-tenant evolution. `IFeatureEntitlementService` provides a single future plan boundary; all existing local features remain enabled. No billing or tenant-isolation claim is made in this version.
+
+## Database evolution and storage
+
+Reframe uses an idempotent, versioned SQLite schema initializer because early installations were created with `EnsureCreated` and have no EF migration history. Startup preserves existing `Jobs` and `Batches`, creates only missing portfolio/history tables and indexes, records the applied Reframe schema version, and creates `My Workspace` only when no workspace exists.
+
+Assessment metadata and reports are retained indefinitely. Generated migration artifacts are not automatically deleted unless `MigrationStorage:MigrationArtifactRetentionDays` is explicitly configured with a positive value. The older `RetentionDays` setting is retained for configuration compatibility but is no longer used as an implicit destructive cleanup policy.
 
 ## Modernization strategies
 

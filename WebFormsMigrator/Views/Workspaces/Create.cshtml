@@ -1,0 +1,4 @@
+@model CreateWorkspaceViewModel
+@{ ViewData["Title"] = "Create workspace"; }
+<section class="dashboard-shell narrow-shell"><nav class="breadcrumbs"><a asp-action="Index">Workspaces</a><span>/</span><b>Create</b></nav><div class="dashboard-heading"><div><span class="eyebrow">New workspace</span><h1>Create workspace</h1><p>A workspace is the durable home for related modernization projects.</p></div></div>
+<form method="post" class="panel product-form"><div asp-validation-summary="ModelOnly" class="validation"></div><label asp-for="Name"><span>Name</span><input asp-for="Name" placeholder="My Workspace" /><span asp-validation-for="Name" class="validation"></span></label><label asp-for="Description"><span>Description</span><textarea asp-for="Description" rows="4" placeholder="Applications and goals covered by this workspace"></textarea></label><button class="primary-button">Create workspace</button></form></section>

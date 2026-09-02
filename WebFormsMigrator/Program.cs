@@ -2,17 +2,24 @@ using WebFormsMigrator.Services;
 using WebFormsMigrator.Persistence;
 using WebFormsMigrator.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
 var storageOptions = builder.Configuration.GetSection(MigrationStorageOptions.SectionName).Get<MigrationStorageOptions>() ?? new();
 var databasePath = Path.GetFullPath(Path.IsPathFullyQualified(storageOptions.DatabasePath)
     ? storageOptions.DatabasePath
     : Path.Combine(builder.Environment.ContentRootPath, storageOptions.DatabasePath));
 Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+var dataProtectionPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "DataProtectionKeys");
+Directory.CreateDirectory(dataProtectionPath);
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 builder.Services.AddMemoryCache();
+builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath)).SetApplicationName("Reframe");
 builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection(OpenAiOptions.SectionName));
 builder.Services.Configure<GeminiOptions>(builder.Configuration.GetSection(GeminiOptions.SectionName));
 builder.Services.Configure<AiProviderOptions>(builder.Configuration.GetSection(AiProviderOptions.SectionName));
@@ -35,6 +42,13 @@ builder.Services.AddHttpClient<OpenRouterMigrationService>(client =>
     client.BaseAddress = new Uri("https://openrouter.ai/api/v1/");
     client.Timeout = Timeout.InfiniteTimeSpan;
 });
+builder.Services.AddHttpClient<IGitHubRepositoryClient, GitHubRepositoryClient>(client =>
+{
+    client.BaseAddress = new Uri("https://api.github.com/");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Reframe-Modernization/1.0");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+    client.Timeout = TimeSpan.FromMinutes(3);
+});
 builder.Services.AddScoped<AiProviderRouter>();
 builder.Services.AddScoped<AiCompilerRepairService>();
 builder.Services.AddSingleton<WebFormsAnalyzer>();
@@ -47,7 +61,12 @@ builder.Services.AddSingleton<ModernizationScoreService>();
 builder.Services.AddSingleton<MigrationEffortEstimator>();
 builder.Services.AddSingleton<ModernizationAssessmentService>();
 builder.Services.AddSingleton<MigrationReportExporter>();
+builder.Services.AddSingleton<SourceFingerprintService>();
+builder.Services.AddSingleton<AssessmentComparisonService>();
+builder.Services.AddSingleton<SourceArchiveReader>();
+builder.Services.AddScoped<GitHubRepositoryImportService>();
 builder.Services.AddSingleton<IFeatureEntitlementService, LocalFeatureEntitlementService>();
+builder.Services.AddSingleton<IStorageCleanupPolicy, ConfiguredStorageCleanupPolicy>();
 builder.Services.AddScoped<FileRegenerationService>();
 builder.Services.AddScoped<IMigrationService, MigrationOrchestrator>();
 builder.Services.AddSingleton<MigrationResultStore>();
@@ -55,15 +74,15 @@ builder.Services.AddSingleton<MigrationJobStore>();
 builder.Services.AddSingleton<MigrationJobRunner>();
 builder.Services.AddSingleton<MigrationRepairService>();
 builder.Services.AddSingleton<MigrationWorkspaceStorage>();
+builder.Services.AddSingleton<ModernizationPortfolioStore>();
+builder.Services.AddSingleton<MigrationDatabaseInitializer>();
 builder.Services.AddHostedService<MigrationRecoveryService>();
 
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
-    var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MigrationDbContext>>();
-    using var database = factory.CreateDbContext();
-    database.Database.EnsureCreated();
+    scope.ServiceProvider.GetRequiredService<MigrationDatabaseInitializer>().Initialize();
 }
 
 // Configure the HTTP request pipeline.

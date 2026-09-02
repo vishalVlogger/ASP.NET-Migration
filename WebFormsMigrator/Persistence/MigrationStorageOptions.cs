@@ -6,4 +6,5 @@ public sealed class MigrationStorageOptions
     public string RootPath { get; set; } = "App_Data/MigrationWorkspaces";
     public string DatabasePath { get; set; } = "App_Data/migrations.db";
     public int RetentionDays { get; set; } = 14;
+    public int? MigrationArtifactRetentionDays { get; set; }
 }

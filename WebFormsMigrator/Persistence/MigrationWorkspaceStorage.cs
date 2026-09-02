@@ -25,6 +25,7 @@ public sealed class MigrationWorkspaceStorage
             : Path.Combine(environment.ContentRootPath, configured));
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(Path.Combine(_root, "results"));
+        Directory.CreateDirectory(Path.Combine(_root, "projects"));
     }
 
     public string CreateWorkspace(string jobId, IReadOnlyCollection<SourceFile> sources)
@@ -42,6 +43,15 @@ public sealed class MigrationWorkspaceStorage
         return File.Exists(path)
             ? JsonSerializer.Deserialize<List<SourceFile>>(File.ReadAllText(path), JsonOptions) ?? []
             : [];
+    }
+
+    public void SaveProjectSources(string projectId, IReadOnlyCollection<SourceFile> sources) =>
+        AtomicWrite(ProjectSourcePath(projectId), JsonSerializer.Serialize(sources, JsonOptions));
+
+    public List<SourceFile> LoadProjectSources(string projectId)
+    {
+        var path = ProjectSourcePath(projectId);
+        return File.Exists(path) ? JsonSerializer.Deserialize<List<SourceFile>>(File.ReadAllText(path), JsonOptions) ?? [] : [];
     }
 
     public void SaveResult(string jobId, MigrationResult result)
@@ -106,6 +116,12 @@ public sealed class MigrationWorkspaceStorage
             throw new InvalidOperationException("Invalid migration result identifier.");
         return SafeChild(Path.Combine(_root, "results"), resultId + ".json")
                ?? throw new InvalidOperationException("Invalid result path.");
+    }
+
+    private string ProjectSourcePath(string projectId)
+    {
+        if (projectId.Length != 32 || projectId.Any(character => !Uri.IsHexDigit(character))) throw new InvalidOperationException("Invalid project identifier.");
+        return SafeChild(Path.Combine(_root, "projects"), projectId + ".sources.json") ?? throw new InvalidOperationException("Invalid project source path.");
     }
 
     private static string RemoveProjectRoot(string path, string projectName)

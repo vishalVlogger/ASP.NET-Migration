@@ -19,7 +19,10 @@ public sealed class HomeController(
     MvcStructureValidator mvcValidator,
     MigrationRepairService repairService,
     FileRegenerationService regeneration,
-    MigrationReportExporter reportExporter) : Controller
+    MigrationReportExporter reportExporter,
+    ModernizationPortfolioStore portfolio,
+    SourceFingerprintService fingerprints,
+    ModernizationAssessmentService assessmentService) : Controller
 {
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -127,6 +130,8 @@ public sealed class HomeController(
 
         model.Result = await migrationService.MigrateAsync(model.ProjectName, model.TargetFramework, sourceFiles, cancellationToken,
             strategy: model.Strategy, dataAccessStrategy: model.DataAccessStrategy);
+        var project = CreateLegacyFlowProject(model, sourceFiles);
+        await portfolio.AddAssessmentAsync(project.Id, model.Result.ReadinessReport!, project.SourceFingerprint!, cancellationToken);
         resultStore.Set(model.Result);
         return View(model);
     }
@@ -147,7 +152,11 @@ public sealed class HomeController(
             return BadRequest(new { errors });
         }
 
-        var jobId = jobRunner.Start(model.ProjectName, model.TargetFramework, sourceFiles, model.Strategy, model.DataAccessStrategy);
+        var project = CreateLegacyFlowProject(model, sourceFiles);
+        var report = assessmentService.Assess(model.ProjectName, sourceFiles, model.Strategy, model.DataAccessStrategy);
+        var assessment = (await portfolio.AddAssessmentAsync(project.Id, report, project.SourceFingerprint!, cancellationToken))!;
+        var jobId = jobRunner.Start(model.ProjectName, model.TargetFramework, sourceFiles, model.Strategy, model.DataAccessStrategy,
+            project.Id, assessment.Id, project.SourceFingerprint);
         return Accepted(new { jobId });
     }
 
@@ -255,6 +264,14 @@ public sealed class HomeController(
         if (!sourceFiles.Any(file => !file.IsSkipped))
             ModelState.AddModelError(string.Empty, "Paste Web Forms source or choose at least one source file.");
         return sourceFiles;
+    }
+
+    private ModernizationProject CreateLegacyFlowProject(MigrationInputViewModel model, IReadOnlyCollection<SourceFile> sources)
+    {
+        var workspace = portfolio.ListWorkspaces().First();
+        var project = portfolio.CreateProject(new CreateProjectViewModel { WorkspaceId = workspace.Id, Name = model.ProjectName, Description = "Created from the classic migration flow.", SourceType = "Upload", Strategy = model.Strategy, DataAccessStrategy = model.DataAccessStrategy });
+        var fingerprint = fingerprints.Compute(sources); workspaces.SaveProjectSources(project.Id, sources); project.SourceFingerprint = fingerprint;
+        return project;
     }
 
     private async Task ReadZipAsync(IFormFile upload, List<SourceFile> sourceFiles, CancellationToken cancellationToken)

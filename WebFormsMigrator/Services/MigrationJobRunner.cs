@@ -10,21 +10,36 @@ public sealed class MigrationJobRunner(
     MigrationResultStore results,
     MigrationWorkspaceStorage workspaces,
     ProjectBatchPlanner planner,
+    ModernizationPortfolioStore portfolio,
     IHostApplicationLifetime lifetime,
     ILogger<MigrationJobRunner> logger)
 {
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new();
+    private readonly ConcurrentDictionary<string, string> _activeProjects = new(StringComparer.OrdinalIgnoreCase);
 
     public string Start(string projectName, string targetFramework, IReadOnlyCollection<SourceFile> files,
         ModernizationStrategy strategy = ModernizationStrategy.BalancedModernization,
-        DataAccessStrategy dataAccessStrategy = DataAccessStrategy.AnalyseOnly)
+        DataAccessStrategy dataAccessStrategy = DataAccessStrategy.AnalyseOnly,
+        string? projectId = null,
+        string? assessmentId = null,
+        string? sourceFingerprint = null)
     {
         var id = Guid.NewGuid().ToString("N");
-        var workspace = workspaces.CreateWorkspace(id, files);
-        jobs.Create(id, projectName, targetFramework, workspace);
-        jobs.SetBatches(id, planner.CreatePlan(files.Where(file => !file.IsSkipped).ToList()));
-        StartRun(id, projectName, targetFramework, files, previous: null, retryFailedOnly: false, forceLocal: false, strategy, dataAccessStrategy);
-        return id;
+        if (projectId is not null && !_activeProjects.TryAdd(projectId, id)) throw new InvalidOperationException("A migration is already running for this project.");
+        try
+        {
+            var workspace = workspaces.CreateWorkspace(id, files);
+            jobs.Create(id, projectName, targetFramework, workspace);
+            jobs.SetBatches(id, planner.CreatePlan(files.Where(file => !file.IsSkipped).ToList()));
+            if (projectId is not null)
+            {
+                using var scope = scopeFactory.CreateScope(); var migration = scope.ServiceProvider.GetRequiredService<IMigrationService>();
+                portfolio.CreateMigrationRun(projectId, assessmentId, id, strategy, dataAccessStrategy, migration.IsAiConfigured, migration.ProviderName, sourceFingerprint ?? "");
+            }
+            StartRun(id, projectName, targetFramework, files, previous: null, retryFailedOnly: false, forceLocal: false, strategy, dataAccessStrategy);
+            return id;
+        }
+        catch { if (projectId is not null) _activeProjects.TryRemove(projectId, out _); throw; }
     }
 
     public bool Resume(string id, bool forceLocal = false)
@@ -105,23 +120,29 @@ public sealed class MigrationJobRunner(
             jobs.Checkpoint(id, result);
             if (result.Build.Status == "passed") jobs.Complete(id, result.Id);
             else jobs.NeedsReview(id, result.Id, result.Build);
+            portfolio.CompleteMigrationRun(id, result, result.Build.Status == "passed" ? "Completed" : "CompletedWithWarnings");
         }
         catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested)
         {
             jobs.Interrupt(id, "The application stopped. Completed batch checkpoints were preserved.");
+            portfolio.FailMigrationRun(id, "Failed");
         }
         catch (OperationCanceledException)
         {
             jobs.Cancel(id);
+            portfolio.FailMigrationRun(id, "Cancelled");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Migration job {JobId} failed.", id);
             jobs.Fail(id, "The migration paused after an error. Fix the problem, then resume from the dashboard.");
+            portfolio.FailMigrationRun(id, "Failed");
         }
         finally
         {
             _active.TryRemove(id, out _);
+            var portfolioRun = portfolio.FindRunByJob(id);
+            if (portfolioRun is not null) _activeProjects.TryRemove(portfolioRun.ProjectId, out _);
             cancellation.Dispose();
         }
     }

@@ -5,7 +5,8 @@ namespace WebFormsMigrator.Services;
 
 public sealed partial class ModernizationAssessmentService(
     ModernizationScoreService scoring,
-    MigrationEffortEstimator effortEstimator)
+    MigrationEffortEstimator effortEstimator,
+    ILogger<ModernizationAssessmentService>? logger = null)
 {
     private sealed record Rule(string Id, string Category, string Title, string Pattern,
         FindingSeverity Severity, string Explanation, string Why, string Recommendation,
@@ -54,6 +55,7 @@ public sealed partial class ModernizationAssessmentService(
     public MigrationReadinessReport Assess(string projectName, IReadOnlyCollection<SourceFile> sources,
         ModernizationStrategy strategy, DataAccessStrategy dataStrategy)
     {
+        logger?.LogInformation("Modernization assessment started for project {ProjectName} with {FileCount} supplied files", projectName, sources.Count);
         var files = sources.Where(file => !file.IsSkipped).ToList();
         var text = files.Where(file => !file.IsBinary).ToList();
         var findings = new List<ModernizationFinding>();
@@ -93,6 +95,7 @@ public sealed partial class ModernizationAssessmentService(
         report.ManualReviewPercentage = Math.Max(0, 100 - report.AutomationPercentage - HighRiskShare(findings));
         report.HighRiskPercentage = 100 - report.AutomationPercentage - report.ManualReviewPercentage;
         report.Effort = effortEstimator.Estimate(report);
+        logger?.LogInformation("Modernization assessment completed for project {ProjectName} with score {Score}, {FindingCount} findings", projectName, report.ModernizationScore.Overall, report.Findings.Count);
         return report;
     }
 

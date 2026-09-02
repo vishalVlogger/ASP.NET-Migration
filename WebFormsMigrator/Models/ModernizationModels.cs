@@ -109,30 +109,80 @@ public sealed class MigrationReadinessReport
 
 public sealed class Workspace
 {
-    public string Id { get; init; } = Guid.NewGuid().ToString("N");
-    public string Name { get; init; } = "Local workspace";
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "My Workspace";
+    public string Slug { get; set; } = "my-workspace";
+    public string Description { get; set; } = "";
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? ArchivedAtUtc { get; set; }
+    public bool IsArchived { get; set; }
+    public List<ModernizationProject> Projects { get; set; } = [];
 }
 
 public sealed class ModernizationProject
 {
-    public string Id { get; init; } = Guid.NewGuid().ToString("N");
-    public string WorkspaceId { get; init; } = "local";
-    public string Name { get; init; } = "";
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string WorkspaceId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public string SourceType { get; set; } = "Upload";
+    public string? SourceRepositoryUrl { get; set; }
+    public string? SourceOwner { get; set; }
+    public string? SourceRepositoryName { get; set; }
+    public string? SourceBranch { get; set; }
+    public string? SourceCommitSha { get; set; }
+    public DateTime? ImportedAtUtc { get; set; }
+    public string? SourceFingerprint { get; set; }
+    public string DetectedFramework { get; set; } = "Not assessed";
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? LastAssessmentAtUtc { get; set; }
+    public DateTime? LastMigrationAtUtc { get; set; }
+    public bool IsArchived { get; set; }
 }
 
 public sealed class MigrationRun
 {
-    public string Id { get; init; } = Guid.NewGuid().ToString("N");
-    public string ProjectId { get; init; } = "";
-    public ModernizationStrategy Strategy { get; init; }
-    public DateTime StartedAtUtc { get; init; } = DateTime.UtcNow;
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string ProjectId { get; set; } = "";
+    public string? AssessmentId { get; set; }
+    public string JobId { get; set; } = "";
+    public ModernizationStrategy Strategy { get; set; }
+    public DataAccessStrategy DataAccessStrategy { get; set; }
+    public string AiMode { get; set; } = "Local";
+    public string? Provider { get; set; }
+    public string SourceFingerprint { get; set; } = "";
+    public string BuildStatus { get; set; } = "not-run";
+    public string ValidationStatus { get; set; } = "pending";
+    public int GeneratedFileCount { get; set; }
+    public int FallbackFileCount { get; set; }
+    public int ManualReviewCount { get; set; }
+    public long DurationMilliseconds { get; set; }
+    public string Status { get; set; } = "Queued";
+    public string? ResultId { get; set; }
+    public DateTime StartedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? CompletedAtUtc { get; set; }
 }
 
 public sealed class Assessment
 {
-    public string Id { get; init; } = Guid.NewGuid().ToString("N");
-    public string ProjectId { get; init; } = "";
-    public MigrationReadinessReport Report { get; init; } = new();
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string ProjectId { get; set; } = "";
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public string SourceFingerprint { get; set; } = "";
+    public string AssessmentEngineVersion { get; set; } = "1.0";
+    public bool SourceChanged { get; set; }
+    public MigrationReadinessReport Report { get; set; } = new();
+}
+
+public sealed class ProjectActivity
+{
+    public long Id { get; set; }
+    public string ProjectId { get; set; } = "";
+    public string EventType { get; set; } = "";
+    public string Description { get; set; } = "";
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class MigrationArtifact
@@ -146,12 +196,16 @@ public sealed class MigrationArtifact
 public enum ProductFeature
 {
     ProjectAnalysis, LocalMigration, MigrationReport, AiMigration, FileRegeneration,
-    LargeProjectMigration, TeamWorkspace, GitHubImport
+    LargeProjectMigration, TeamWorkspace, GitHubImport, WorkspaceManagement,
+    AssessmentHistory, AssessmentComparison, MigrationHistory
 }
+
+public sealed record FeatureEntitlement(ProductFeature Feature, bool Enabled, int? Limit = null, int? RetentionDays = null);
 
 public interface IFeatureEntitlementService
 {
     bool IsEnabled(ProductFeature feature);
+    FeatureEntitlement Get(ProductFeature feature);
 }
 
 public sealed class LocalFeatureEntitlementService : IFeatureEntitlementService
@@ -159,8 +213,11 @@ public sealed class LocalFeatureEntitlementService : IFeatureEntitlementService
     private static readonly HashSet<ProductFeature> Enabled =
     [
         ProductFeature.ProjectAnalysis, ProductFeature.LocalMigration, ProductFeature.MigrationReport,
-        ProductFeature.FileRegeneration, ProductFeature.LargeProjectMigration
+        ProductFeature.FileRegeneration, ProductFeature.LargeProjectMigration, ProductFeature.WorkspaceManagement,
+        ProductFeature.AssessmentHistory, ProductFeature.AssessmentComparison, ProductFeature.GitHubImport,
+        ProductFeature.MigrationHistory
     ];
 
     public bool IsEnabled(ProductFeature feature) => Enabled.Contains(feature);
+    public FeatureEntitlement Get(ProductFeature feature) => new(feature, IsEnabled(feature));
 }

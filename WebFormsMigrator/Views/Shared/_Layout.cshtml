@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/portfolio.css" asp-append-version="true" />
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -15,8 +16,9 @@
         <a asp-controller="Home" asp-action="Index" class="brand"><span>{</span> reframe <span>}</span></a>
         <nav class="header-right" aria-label="Primary navigation">
             <span>ASP.NET modernization</span>
+            <a asp-controller="Workspaces" asp-action="Index">Workspaces</a>
             <a asp-controller="Home" asp-action="Dashboard">Migrations</a>
-            <a asp-controller="Home" asp-action="Index" class="header-cta">New migration</a>
+            <a asp-controller="Projects" asp-action="Create" class="header-cta">Create project</a>
         </nav>
     </header>
     <main id="main-content">@RenderBody()</main>

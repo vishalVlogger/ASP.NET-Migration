@@ -7,21 +7,21 @@ public sealed class MigrationRecoveryService(
     MigrationJobStore jobs,
     MigrationWorkspaceStorage workspaces,
     MigrationResultStore results,
-    IOptions<MigrationStorageOptions> options,
+    IStorageCleanupPolicy cleanupPolicy,
     ILogger<MigrationRecoveryService> logger) : IHostedService
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
         jobs.MarkRunningInterrupted();
-        var retentionDays = Math.Max(1, options.Value.RetentionDays);
-        var expired = jobs.ListExpired(DateTime.UtcNow.AddDays(-retentionDays));
+        var cutoff = cleanupPolicy.ArtifactCutoffUtc(DateTime.UtcNow);
+        var expired = cutoff is null ? [] : jobs.ListExpired(cutoff.Value);
         foreach (var job in expired)
         {
             workspaces.DeleteWorkspace(job.Id, job.ResultId);
             if (job.ResultId is not null) results.Remove(job.ResultId);
             jobs.Delete(job.Id);
         }
-        logger.LogInformation("Persistent migration recovery scan completed; {Count} expired jobs removed.", expired.Count);
+        logger.LogInformation("Persistent migration recovery scan completed; {Count} expired artifacts removed; cleanup configured: {CleanupConfigured}.", expired.Count, cutoff is not null);
         return Task.CompletedTask;
     }
 
