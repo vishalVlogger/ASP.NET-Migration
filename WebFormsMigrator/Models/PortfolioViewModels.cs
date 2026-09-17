@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using WebFormsMigrator.Services;
 
 namespace WebFormsMigrator.Models;
 
@@ -39,6 +40,17 @@ public sealed class ProjectDashboardViewModel
     public List<Assessment> Assessments { get; init; } = [];
     public List<MigrationRun> MigrationRuns { get; init; } = [];
     public List<ProjectActivity> Activities { get; init; } = [];
+    public List<AiInvocationUsage> AiUsage { get; init; } = [];
+}
+
+public sealed class AiSetupViewModel
+{
+    public string SelectedProvider { get; init; } = "";
+    public bool CloudConfigured { get; init; }
+    public bool LocalEnabled { get; init; }
+    public string LocalEndpoint { get; init; } = "";
+    public string LocalModel { get; init; } = "";
+    public LocalAiHealth? Health { get; init; }
 }
 
 public sealed class WorkspaceDetailsViewModel
@@ -46,6 +58,36 @@ public sealed class WorkspaceDetailsViewModel
     public Workspace Workspace { get; init; } = new();
     public List<ModernizationProject> Projects { get; init; } = [];
     public ProjectListQuery Query { get; init; } = new();
+}
+
+public sealed class PortfolioOverviewViewModel
+{
+    public List<Workspace> Workspaces { get; init; } = [];
+    public List<ModernizationProject> RecentProjects { get; init; } = [];
+    public List<MigrationJobListItem> RecentJobs { get; init; } = [];
+    public int ProjectCount { get; init; }
+    public int ReviewRequiredCount { get; init; }
+    public int RunningMigrationCount { get; init; }
+    public decimal MonthAiCost { get; init; }
+    public SubscriptionSnapshot Subscription { get; init; } = new("Development", "Configuration-managed");
+}
+
+public sealed class ProjectNavigationViewModel
+{
+    public string ProjectId { get; init; } = "";
+    public string ProjectName { get; init; } = "Project";
+    public string? LatestAssessmentId { get; init; }
+    public string Active { get; init; } = "overview";
+}
+
+public sealed class SystemSettingsViewModel
+{
+    public bool AuthenticationRequired { get; init; }
+    public string TenantId { get; init; } = "local";
+    public string StorageProvider { get; init; } = "Local filesystem";
+    public string DatabasePath { get; init; } = "";
+    public string ArtifactPath { get; init; } = "";
+    public int? ArtifactRetentionDays { get; init; }
 }
 
 public sealed class AssessmentHistoryViewModel

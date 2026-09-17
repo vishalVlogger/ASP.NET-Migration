@@ -111,6 +111,7 @@ public sealed class Workspace
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "My Workspace";
+    public string TenantId { get; set; } = "local";
     public string Slug { get; set; } = "my-workspace";
     public string Description { get; set; } = "";
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

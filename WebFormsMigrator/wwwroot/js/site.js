@@ -284,4 +284,34 @@ document.querySelector('#job-search')?.addEventListener('input', event => {
     document.querySelector('#job-filter-count').textContent = `Showing ${visible} migration(s)`;
 });
 
+const navToggle = document.querySelector('.nav-toggle');
+const primaryNavigation = document.querySelector('#primary-navigation');
+navToggle?.addEventListener('click', () => {
+    const open = primaryNavigation.classList.toggle('open');
+    navToggle.setAttribute('aria-expanded', String(open));
+});
+
+document.querySelectorAll('.global-toast button').forEach(button => button.addEventListener('click', () => button.closest('.global-toast').classList.add('dismissed')));
+
+const sourceInputs = [...document.querySelectorAll('[data-onboarding-form] input[name="SourceType"]')];
+function updateSourcePanels() {
+    const selected = sourceInputs.find(input => input.checked)?.value || 'Upload';
+    document.querySelectorAll('[data-source-panel]').forEach(panel => {
+        const active = panel.dataset.sourcePanel === selected;
+        panel.hidden = !active;
+        panel.querySelectorAll('input').forEach(input => input.disabled = !active);
+    });
+}
+sourceInputs.forEach(input => input.addEventListener('change', updateSourcePanels));
+updateSourcePanels();
+
+document.querySelectorAll('form:not(#migration-form)').forEach(form => form.addEventListener('submit', event => {
+    if (event.defaultPrevented || form.dataset.submitting === 'true') return;
+    form.dataset.submitting = 'true';
+    const button = event.submitter;
+    if (!button) return;
+    const label = button.textContent;
+    window.requestAnimationFrame(() => { button.disabled = true; button.textContent = 'Working…'; button.setAttribute('aria-label', `${label} in progress`); });
+}));
+
 if (document.querySelector('#results')) document.querySelector('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });

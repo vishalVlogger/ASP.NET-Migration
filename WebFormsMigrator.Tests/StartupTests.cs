@@ -19,16 +19,22 @@ public sealed class StartupTests : IClassFixture<WebApplicationFactory<Program>>
     });
 
     [Fact]
-    public async Task Application_starts_and_home_page_explains_no_ai_mode()
+    public async Task Application_starts_with_portfolio_overview_and_no_ai_flow_available()
     {
         using var client = _factory.CreateClient();
         using var response = await client.GetAsync("/");
         var html = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, html);
-        Assert.Contains("AI Enhancement: Not configured", html);
-        Assert.Contains("Deterministic analysis", html);
+        Assert.Contains("Modernization portfolio", html);
+        Assert.Contains("Recent projects", html);
+        var localMigration = await client.GetStringAsync("/Home");
+        Assert.Contains("AI Enhancement: Not configured", localMigration);
+        Assert.Contains("Deterministic analysis", localMigration);
         Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/Workspaces")).StatusCode);
         Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/Projects/Create")).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/AI")).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/Plan")).StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/Settings")).StatusCode);
     }
 
     [Fact]

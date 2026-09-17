@@ -5,7 +5,7 @@ namespace WebFormsMigrator.Services;
 
 public sealed class MigrationRecoveryService(
     MigrationJobStore jobs,
-    MigrationWorkspaceStorage workspaces,
+    IMigrationWorkspaceStorage workspaces,
     MigrationResultStore results,
     IStorageCleanupPolicy cleanupPolicy,
     ILogger<MigrationRecoveryService> logger) : IHostedService

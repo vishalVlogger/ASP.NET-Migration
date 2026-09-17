@@ -2,14 +2,16 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using WebFormsMigrator.Models;
+using WebFormsMigrator.Services;
 
 namespace WebFormsMigrator.Persistence;
 
-public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbContext> factory, ILogger<ModernizationPortfolioStore> logger)
+public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbContext> factory, ILogger<ModernizationPortfolioStore> logger, ICurrentTenant? currentTenant = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _projectLocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _activeProjectOperations = new(StringComparer.OrdinalIgnoreCase);
+    private string TenantId => currentTenant?.TenantId ?? "local";
 
     public IDisposable? TryBeginProjectOperation(string projectId, string operation)
     {
@@ -20,14 +22,18 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
     public List<Workspace> ListWorkspaces(bool includeArchived = false)
     {
         using var db = factory.CreateDbContext();
-        return db.PortfolioWorkspaces.AsNoTracking().Where(item => includeArchived || !item.IsArchived)
+        var tenant = TenantId;
+        return db.PortfolioWorkspaces.AsNoTracking().Where(item => item.TenantId == tenant && (includeArchived || !item.IsArchived))
             .OrderBy(item => item.Name).Select(item => Map(item)).ToList();
     }
+
+    public int CountWorkspaces() { using var db = factory.CreateDbContext(); var tenant = TenantId; return db.PortfolioWorkspaces.Count(item => item.TenantId == tenant); }
+    public int CountProjects() { using var db = factory.CreateDbContext(); var tenant = TenantId; return db.Projects.Join(db.PortfolioWorkspaces, project => project.WorkspaceId, workspace => workspace.Id, (project, workspace) => new { project, workspace }).Count(item => item.workspace.TenantId == tenant); }
 
     public Workspace? GetWorkspace(string id, bool includeProjects = false)
     {
         using var db = factory.CreateDbContext();
-        var record = db.PortfolioWorkspaces.AsNoTracking().SingleOrDefault(item => item.Id == id);
+        var tenant = TenantId; var record = db.PortfolioWorkspaces.AsNoTracking().SingleOrDefault(item => item.Id == id && item.TenantId == tenant);
         if (record is null) return null;
         var workspace = Map(record);
         if (includeProjects) workspace.Projects = db.Projects.AsNoTracking().Where(item => item.WorkspaceId == id).OrderByDescending(item => item.UpdatedAtUtc).Select(item => Map(item)).ToList();
@@ -40,7 +46,7 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
         var now = DateTime.UtcNow;
         var baseSlug = Slugify(name); var slug = baseSlug; var suffix = 2;
         while (db.PortfolioWorkspaces.Any(item => item.Slug == slug)) slug = $"{baseSlug}-{suffix++}";
-        var record = new WorkspaceRecord { Id = Guid.NewGuid().ToString("N"), Name = name.Trim(), Slug = slug, Description = description.Trim(), CreatedAtUtc = now, UpdatedAtUtc = now };
+        var record = new WorkspaceRecord { Id = Guid.NewGuid().ToString("N"), TenantId = TenantId, Name = name.Trim(), Slug = slug, Description = description.Trim(), CreatedAtUtc = now, UpdatedAtUtc = now };
         db.PortfolioWorkspaces.Add(record); db.SaveChanges();
         logger.LogInformation("Workspace created {WorkspaceId}", record.Id);
         return Map(record);
@@ -48,13 +54,13 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
 
     public bool UpdateWorkspace(string id, string name, string description)
     {
-        using var db = factory.CreateDbContext(); var record = db.PortfolioWorkspaces.Find(id); if (record is null) return false;
+        using var db = factory.CreateDbContext(); var tenant = TenantId; var record = db.PortfolioWorkspaces.SingleOrDefault(item => item.Id == id && item.TenantId == tenant); if (record is null) return false;
         record.Name = name.Trim(); record.Description = description.Trim(); record.UpdatedAtUtc = DateTime.UtcNow; db.SaveChanges(); return true;
     }
 
     public bool SetWorkspaceArchived(string id, bool archived)
     {
-        using var db = factory.CreateDbContext(); var record = db.PortfolioWorkspaces.Find(id); if (record is null) return false;
+        using var db = factory.CreateDbContext(); var tenant = TenantId; var record = db.PortfolioWorkspaces.SingleOrDefault(item => item.Id == id && item.TenantId == tenant); if (record is null) return false;
         record.IsArchived = archived; record.ArchivedAtUtc = archived ? DateTime.UtcNow : null; record.UpdatedAtUtc = DateTime.UtcNow; db.SaveChanges();
         logger.LogInformation("Workspace {WorkspaceId} archived state changed to {IsArchived}", id, archived); return true;
     }
@@ -62,7 +68,7 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
     public ModernizationProject CreateProject(CreateProjectViewModel model, GitHubRepositoryMetadata? metadata = null)
     {
         using var db = factory.CreateDbContext();
-        if (!db.PortfolioWorkspaces.Any(item => item.Id == model.WorkspaceId)) throw new InvalidOperationException("Workspace was not found.");
+        var tenant = TenantId; if (!db.PortfolioWorkspaces.Any(item => item.Id == model.WorkspaceId && item.TenantId == tenant)) throw new InvalidOperationException("Workspace was not found.");
         var now = DateTime.UtcNow; var record = new ProjectRecord
         {
             Id = Guid.NewGuid().ToString("N"), WorkspaceId = model.WorkspaceId, Name = model.Name.Trim(), Description = model.Description.Trim(), SourceType = model.SourceType,
@@ -76,12 +82,13 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
 
     public ModernizationProject? GetProject(string id)
     {
-        using var db = factory.CreateDbContext(); var record = db.Projects.AsNoTracking().SingleOrDefault(item => item.Id == id); return record is null ? null : Map(record);
+        using var db = factory.CreateDbContext(); var tenant = TenantId; var record = db.Projects.AsNoTracking().Join(db.PortfolioWorkspaces.AsNoTracking(), project => project.WorkspaceId, workspace => workspace.Id, (project, workspace) => new { project, workspace }).Where(item => item.project.Id == id && item.workspace.TenantId == tenant).Select(item => item.project).SingleOrDefault(); return record is null ? null : Map(record);
     }
 
     public List<ModernizationProject> ListProjects(string workspaceId, ProjectListQuery query)
     {
         using var db = factory.CreateDbContext();
+        var tenant = TenantId; if (!db.PortfolioWorkspaces.Any(item => item.Id == workspaceId && item.TenantId == tenant)) return [];
         var projects = db.Projects.AsNoTracking().Where(item => item.WorkspaceId == workspaceId && item.IsArchived == query.Archived).ToList();
         if (!string.IsNullOrWhiteSpace(query.Search)) projects = projects.Where(item => item.Name.Contains(query.Search, StringComparison.OrdinalIgnoreCase)).ToList();
         if (!string.IsNullOrWhiteSpace(query.SourceType)) projects = projects.Where(item => item.SourceType.Equals(query.SourceType, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -100,13 +107,13 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
 
     public bool SetProjectArchived(string id, bool archived)
     {
-        using var db = factory.CreateDbContext(); var project = db.Projects.Find(id); if (project is null) return false;
+        using var db = factory.CreateDbContext(); var project = OwnedProjects(db).SingleOrDefault(item => item.Id == id); if (project is null) return false;
         project.IsArchived = archived; project.UpdatedAtUtc = DateTime.UtcNow; db.SaveChanges(); AddActivity(id, archived ? "ProjectArchived" : "ProjectRestored", archived ? "Project archived." : "Project restored."); return true;
     }
 
     public bool UpdateProject(string id, string name, string description)
     {
-        using var db = factory.CreateDbContext(); var project = db.Projects.Find(id); if (project is null) return false;
+        using var db = factory.CreateDbContext(); var project = OwnedProjects(db).SingleOrDefault(item => item.Id == id); if (project is null) return false;
         project.Name = name.Trim(); project.Description = description.Trim(); project.UpdatedAtUtc = DateTime.UtcNow; db.SaveChanges(); return true;
     }
 
@@ -115,7 +122,7 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
         var gate = _projectLocks.GetOrAdd(projectId, _ => new SemaphoreSlim(1, 1)); await gate.WaitAsync(cancellationToken);
         try
         {
-            await using var db = await factory.CreateDbContextAsync(cancellationToken); var project = await db.Projects.FindAsync([projectId], cancellationToken) ?? throw new InvalidOperationException("Project was not found.");
+            await using var db = await factory.CreateDbContextAsync(cancellationToken); var project = await OwnedProjects(db).SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken) ?? throw new InvalidOperationException("Project was not found.");
             var previous = await db.Assessments.Where(item => item.ProjectId == projectId).OrderByDescending(item => item.CreatedAtUtc).FirstOrDefaultAsync(cancellationToken);
             if (skipIfUnchanged && previous?.SourceFingerprint == fingerprint) return null;
             var now = DateTime.UtcNow; var record = new AssessmentRecord
@@ -135,29 +142,29 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
 
     public Assessment? GetAssessment(string id)
     {
-        using var db = factory.CreateDbContext(); var record = db.Assessments.AsNoTracking().SingleOrDefault(item => item.Id == id); return record is null ? null : Map(record);
+        using var db = factory.CreateDbContext(); var tenant = TenantId; var record = db.Assessments.AsNoTracking().Join(db.Projects, assessment => assessment.ProjectId, project => project.Id, (assessment, project) => new { assessment, project }).Join(db.PortfolioWorkspaces, item => item.project.WorkspaceId, workspace => workspace.Id, (item, workspace) => new { item.assessment, workspace }).Where(item => item.assessment.Id == id && item.workspace.TenantId == tenant).Select(item => item.assessment).SingleOrDefault(); return record is null ? null : Map(record);
     }
 
     public Assessment? GetLatestAssessment(string projectId)
     {
-        using var db = factory.CreateDbContext(); var record = db.Assessments.AsNoTracking().Where(item => item.ProjectId == projectId).OrderByDescending(item => item.CreatedAtUtc).FirstOrDefault(); return record is null ? null : Map(record);
+        using var db = factory.CreateDbContext(); if (!OwnedProjects(db).Any(item => item.Id == projectId)) return null; var record = db.Assessments.AsNoTracking().Where(item => item.ProjectId == projectId).OrderByDescending(item => item.CreatedAtUtc).FirstOrDefault(); return record is null ? null : Map(record);
     }
 
     public bool IsLatestFingerprint(string projectId, string fingerprint)
     {
-        using var db = factory.CreateDbContext();
+        using var db = factory.CreateDbContext(); if (!OwnedProjects(db).Any(item => item.Id == projectId)) return false;
         return db.Assessments.AsNoTracking().Where(item => item.ProjectId == projectId).OrderByDescending(item => item.CreatedAtUtc)
             .Select(item => item.SourceFingerprint).FirstOrDefault() == fingerprint;
     }
 
     public List<Assessment> ListAssessments(string projectId)
     {
-        using var db = factory.CreateDbContext(); return db.Assessments.AsNoTracking().Where(item => item.ProjectId == projectId).OrderByDescending(item => item.CreatedAtUtc).AsEnumerable().Select(Map).ToList();
+        using var db = factory.CreateDbContext(); if (!OwnedProjects(db).Any(item => item.Id == projectId)) return []; return db.Assessments.AsNoTracking().Where(item => item.ProjectId == projectId).OrderByDescending(item => item.CreatedAtUtc).AsEnumerable().Select(Map).ToList();
     }
 
     public MigrationRun CreateMigrationRun(string projectId, string? assessmentId, string jobId, ModernizationStrategy strategy, DataAccessStrategy dataStrategy, bool ai, string? provider, string fingerprint)
     {
-        using var db = factory.CreateDbContext(); var now = DateTime.UtcNow; var record = new MigrationRunRecord { Id = Guid.NewGuid().ToString("N"), ProjectId = projectId, AssessmentId = assessmentId, JobId = jobId, Strategy = (int)strategy, DataAccessStrategy = (int)dataStrategy, AiMode = ai ? "AI-assisted" : "Local", Provider = ai ? provider : null, SourceFingerprint = fingerprint, Status = "Running", StartedAtUtc = now };
+        using var db = factory.CreateDbContext(); if (!OwnedProjects(db).Any(item => item.Id == projectId)) throw new InvalidOperationException("Project was not found."); var now = DateTime.UtcNow; var record = new MigrationRunRecord { Id = Guid.NewGuid().ToString("N"), ProjectId = projectId, AssessmentId = assessmentId, JobId = jobId, Strategy = (int)strategy, DataAccessStrategy = (int)dataStrategy, AiMode = ai ? "AI-assisted" : "Local", Provider = ai ? provider : null, SourceFingerprint = fingerprint, Status = "Running", StartedAtUtc = now };
         db.MigrationRuns.Add(record); var project = db.Projects.Find(projectId); if (project is not null) { project.LastMigrationAtUtc = now; project.UpdatedAtUtc = now; } db.SaveChanges(); AddActivity(projectId, "MigrationStarted", $"Migration {record.Id[..8]} started.");
         logger.LogInformation("Migration run {MigrationRunId} started for project {ProjectId} job {JobId}", record.Id, projectId, jobId); return Map(record);
     }
@@ -184,7 +191,7 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
 
     public void UpdateGitHubSource(string projectId, GitHubRepositoryMetadata metadata, string fingerprint)
     {
-        using var db = factory.CreateDbContext(); var project = db.Projects.Find(projectId) ?? throw new InvalidOperationException("Project was not found.");
+        using var db = factory.CreateDbContext(); var project = OwnedProjects(db).SingleOrDefault(item => item.Id == projectId) ?? throw new InvalidOperationException("Project was not found.");
         project.SourceRepositoryUrl = metadata.RepositoryUrl; project.SourceOwner = metadata.Owner; project.SourceRepositoryName = metadata.RepositoryName; project.SourceBranch = metadata.Branch; project.SourceCommitSha = metadata.CommitSha; project.ImportedAtUtc = metadata.ImportedAtUtc; project.SourceFingerprint = fingerprint; project.UpdatedAtUtc = DateTime.UtcNow; db.SaveChanges();
     }
 
@@ -193,7 +200,8 @@ public sealed class ModernizationPortfolioStore(IDbContextFactory<MigrationDbCon
         using var db = factory.CreateDbContext(); db.ProjectActivities.Add(new ProjectActivityRecord { ProjectId = projectId, EventType = type, Description = description, CreatedAtUtc = DateTime.UtcNow }); db.SaveChanges();
     }
 
-    private static Workspace Map(WorkspaceRecord item) => new() { Id = item.Id, Name = item.Name, Slug = item.Slug, Description = item.Description, CreatedAtUtc = item.CreatedAtUtc, UpdatedAtUtc = item.UpdatedAtUtc, ArchivedAtUtc = item.ArchivedAtUtc, IsArchived = item.IsArchived };
+    private IQueryable<ProjectRecord> OwnedProjects(MigrationDbContext db) { var tenant = TenantId; return db.Projects.Join(db.PortfolioWorkspaces, project => project.WorkspaceId, workspace => workspace.Id, (project, workspace) => new { project, workspace }).Where(item => item.workspace.TenantId == tenant).Select(item => item.project); }
+    private static Workspace Map(WorkspaceRecord item) => new() { Id = item.Id, TenantId = item.TenantId, Name = item.Name, Slug = item.Slug, Description = item.Description, CreatedAtUtc = item.CreatedAtUtc, UpdatedAtUtc = item.UpdatedAtUtc, ArchivedAtUtc = item.ArchivedAtUtc, IsArchived = item.IsArchived };
     private static ModernizationProject Map(ProjectRecord item) => new() { Id = item.Id, WorkspaceId = item.WorkspaceId, Name = item.Name, Description = item.Description, SourceType = item.SourceType, SourceRepositoryUrl = item.SourceRepositoryUrl, SourceOwner = item.SourceOwner, SourceRepositoryName = item.SourceRepositoryName, SourceBranch = item.SourceBranch, SourceCommitSha = item.SourceCommitSha, ImportedAtUtc = item.ImportedAtUtc, SourceFingerprint = item.SourceFingerprint, DetectedFramework = item.DetectedFramework, CreatedAtUtc = item.CreatedAtUtc, UpdatedAtUtc = item.UpdatedAtUtc, LastAssessmentAtUtc = item.LastAssessmentAtUtc, LastMigrationAtUtc = item.LastMigrationAtUtc, IsArchived = item.IsArchived };
     private static Assessment Map(AssessmentRecord item) => new() { Id = item.Id, ProjectId = item.ProjectId, CreatedAtUtc = item.CreatedAtUtc, SourceFingerprint = item.SourceFingerprint, AssessmentEngineVersion = item.AssessmentEngineVersion, SourceChanged = item.SourceChanged, Report = JsonSerializer.Deserialize<MigrationReadinessReport>(item.ReportJson, JsonOptions) ?? new() };
     private static MigrationRun Map(MigrationRunRecord item) => new() { Id = item.Id, ProjectId = item.ProjectId, AssessmentId = item.AssessmentId, JobId = item.JobId, Strategy = (ModernizationStrategy)item.Strategy, DataAccessStrategy = (DataAccessStrategy)item.DataAccessStrategy, AiMode = item.AiMode, Provider = item.Provider, SourceFingerprint = item.SourceFingerprint, BuildStatus = item.BuildStatus, ValidationStatus = item.ValidationStatus, GeneratedFileCount = item.GeneratedFileCount, FallbackFileCount = item.FallbackFileCount, ManualReviewCount = item.ManualReviewCount, DurationMilliseconds = item.DurationMilliseconds, Status = item.Status, ResultId = item.ResultId, StartedAtUtc = item.StartedAtUtc, CompletedAtUtc = item.CompletedAtUtc };

@@ -1,0 +1,11 @@
+@model SystemSettingsViewModel
+@{ ViewData["Title"] = "System settings"; }
+<section class="dashboard-shell portfolio-shell settings-page">
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a asp-controller="Overview" asp-action="Index">Overview</a><span>/</span><b>System settings</b></nav>
+    <div class="dashboard-heading"><div><span class="eyebrow">Deployment</span><h1>Security &amp; storage</h1><p>Review the effective operational configuration without exposing credentials.</p></div></div>
+    <div class="overview-grid">
+        <section class="panel settings-summary"><span class="eyebrow">Security</span><h2>@(Model.AuthenticationRequired ? "Authentication required" : "Anonymous local access")</h2><dl><div><dt>Tenant</dt><dd><code>@Model.TenantId</code></dd></div><div><dt>Session</dt><dd>@(Model.AuthenticationRequired ? "Protected by an HTTP-only cookie" : "Enable Access:RequireAuthentication before deployment")</dd></div><div><dt>Password</dt><dd>Environment variable only; never displayed or persisted</dd></div></dl></section>
+        <section class="panel settings-summary"><span class="eyebrow">Storage</span><h2>@Model.StorageProvider</h2><dl><div><dt>Database</dt><dd><code>@Model.DatabasePath</code></dd></div><div><dt>Artifacts</dt><dd><code>@Model.ArtifactPath</code></dd></div><div><dt>Cleanup</dt><dd>@(Model.ArtifactRetentionDays is int days ? $"After {days} days" : "Automatic deletion disabled")</dd></div></dl></section>
+    </div>
+    @if (!Model.AuthenticationRequired) { <div class="commercial-note"><b>Deployment gate</b><p>Anonymous access is appropriate for a developer workstation. Enable authentication before exposing Reframe on a network.</p></div> }
+</section>

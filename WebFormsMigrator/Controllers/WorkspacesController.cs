@@ -1,22 +1,24 @@
 using Microsoft.AspNetCore.Mvc;
 using WebFormsMigrator.Models;
 using WebFormsMigrator.Persistence;
+using WebFormsMigrator.Services;
 
 namespace WebFormsMigrator.Controllers;
 
 [Route("Workspaces")]
-public sealed class WorkspacesController(ModernizationPortfolioStore store) : Controller
+public sealed class WorkspacesController(ModernizationPortfolioStore store, IFeatureEntitlementService entitlements, UsageQuotaService quotas) : Controller
 {
     [HttpGet("")]
     public IActionResult Index(bool archived = false) { ViewBag.Archived = archived; return View(store.ListWorkspaces(archived).Where(item => archived || !item.IsArchived).ToList()); }
 
     [HttpGet("Create")]
-    public IActionResult Create() => View(new CreateWorkspaceViewModel());
+    public IActionResult Create() => entitlements.IsEnabled(ProductFeature.WorkspaceManagement) ? View(new CreateWorkspaceViewModel()) : StatusCode(403);
 
     [HttpPost("Create"), ValidateAntiForgeryToken]
     public IActionResult Create(CreateWorkspaceViewModel model)
     {
         if (!ModelState.IsValid) return View(model);
+        if (!quotas.CanCreateWorkspace(out var reason)) { ModelState.AddModelError(string.Empty, reason); return View(model); }
         var workspace = store.CreateWorkspace(model.Name, model.Description); return RedirectToAction(nameof(Details), new { id = workspace.Id });
     }
 

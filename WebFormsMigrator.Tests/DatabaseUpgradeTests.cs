@@ -26,6 +26,30 @@ public sealed class DatabaseUpgradeTests
         finally { try { File.Delete(path); } catch (IOException) { } }
     }
 
+    [Fact]
+    public void Version_one_workspace_database_gains_tenant_column_without_losing_rows()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"reframe-workspace-upgrade-{Guid.NewGuid():N}.db");
+        try
+        {
+            var options = new DbContextOptionsBuilder<MigrationDbContext>().UseSqlite($"Data Source={path}").Options;
+            var factory = new Factory(options);
+            using (var db = factory.CreateDbContext())
+            {
+                db.Database.ExecuteSqlRaw("CREATE TABLE PortfolioWorkspaces (Id TEXT NOT NULL PRIMARY KEY, Name TEXT NOT NULL, Slug TEXT NOT NULL, Description TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL, ArchivedAtUtc TEXT NULL, IsArchived INTEGER NOT NULL)");
+                db.Database.ExecuteSqlRaw("INSERT INTO PortfolioWorkspaces VALUES ('existing','Existing','existing','Kept','2026-01-01','2026-01-01',NULL,0)");
+            }
+
+            new MigrationDatabaseInitializer(factory, NullLogger<MigrationDatabaseInitializer>.Instance).Initialize();
+
+            using var verification = factory.CreateDbContext();
+            var workspace = Assert.Single(verification.PortfolioWorkspaces);
+            Assert.Equal("existing", workspace.Id);
+            Assert.Equal("local", workspace.TenantId);
+        }
+        finally { try { File.Delete(path); } catch (IOException) { } }
+    }
+
     private sealed class Factory(DbContextOptions<MigrationDbContext> options) : IDbContextFactory<MigrationDbContext>
     {
         public MigrationDbContext CreateDbContext() => new(options);

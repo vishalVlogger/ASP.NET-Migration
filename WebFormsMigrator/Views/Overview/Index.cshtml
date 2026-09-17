@@ -1,0 +1,39 @@
+@model PortfolioOverviewViewModel
+@{ ViewData["Title"] = "Overview"; }
+<section class="dashboard-shell portfolio-shell overview-page">
+    <div class="dashboard-heading">
+        <div><span class="eyebrow">Modernization portfolio</span><h1>Overview</h1><p>Continue active work, resolve migration gates, and track your portfolio from one place.</p></div>
+        <a asp-controller="Projects" asp-action="Create" class="download-button">New project →</a>
+    </div>
+    <div class="overview-metrics" aria-label="Portfolio summary">
+        <a asp-controller="Workspaces" asp-action="Index"><span>Workspaces</span><strong>@Model.Workspaces.Count</strong><small>Active portfolio groups</small></a>
+        <a asp-controller="Workspaces" asp-action="Index"><span>Projects</span><strong>@Model.ProjectCount</strong><small>Applications being modernized</small></a>
+        <a asp-controller="Home" asp-action="Dashboard" class="@(Model.ReviewRequiredCount > 0 ? "attention" : "")"><span>Review required</span><strong>@Model.ReviewRequiredCount</strong><small>Runs needing engineering action</small></a>
+        <a asp-controller="Commercial" asp-action="Index"><span>AI usage this month</span><strong>$@Model.MonthAiCost.ToString("0.00")</strong><small>@Model.Subscription.Plan plan</small></a>
+    </div>
+    <div class="overview-grid">
+        <section class="panel overview-section">
+            <div class="section-heading"><div><span class="eyebrow">Continue working</span><h2>Recent projects</h2></div><a asp-controller="Workspaces" asp-action="Index">All workspaces</a></div>
+            @if (Model.RecentProjects.Count == 0)
+            {
+                <div class="empty-mini"><b>No projects yet</b><p>Import a Web Forms project to create the first evidence-backed assessment.</p><a asp-controller="Projects" asp-action="Create">Create project →</a></div>
+            }
+            else
+            {
+                <div class="overview-list">@foreach (var project in Model.RecentProjects) { <a asp-controller="Projects" asp-action="Details" asp-route-id="@project.Id"><span class="status-badge">@project.SourceType</span><div><b>@project.Name</b><small>@project.DetectedFramework · Updated @project.UpdatedAtUtc.ToLocalTime().ToString("dd MMM")</small></div><em>Open →</em></a> }</div>
+            }
+        </section>
+        <section class="panel overview-section">
+            <div class="section-heading"><div><span class="eyebrow">Operations</span><h2>Migration queue</h2></div><a asp-controller="Home" asp-action="Dashboard">Open queue</a></div>
+            @if (Model.RecentJobs.Count == 0) { <div class="empty-mini">No migration runs yet.</div> }
+            else
+            {
+                <div class="overview-list compact">@foreach (var job in Model.RecentJobs) { var label = job.State switch { "complete" => "Ready for testing", "needs-review" => "Review required", "running" => "Migrating", "failed" or "interrupted" => "Review required", _ => job.State }; <a asp-controller="Home" asp-action="Dashboard"><span class="run-state state-@job.State">@label</span><div><b>@job.ProjectName</b><small>@job.Stage</small></div><em>@job.Percent%</em></a> }</div>
+            }
+        </section>
+    </div>
+    <section class="getting-started panel">
+        <div><span class="eyebrow">Recommended workflow</span><h2>From legacy source to a testable package</h2></div>
+        <ol><li><b>Import</b><span>Upload a ZIP or connect a public repository.</span></li><li><b>Assess</b><span>Review evidence, risk, effort, and automation potential.</span></li><li><b>Migrate</b><span>Choose deterministic, private local AI, or managed cloud AI.</span></li><li><b>Validate</b><span>Resolve build, structure, coverage, and behavioral-test gates.</span></li></ol>
+    </section>
+</section>

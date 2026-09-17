@@ -8,9 +8,10 @@ public sealed class MigrationJobRunner(
     IServiceScopeFactory scopeFactory,
     MigrationJobStore jobs,
     MigrationResultStore results,
-    MigrationWorkspaceStorage workspaces,
+    IMigrationWorkspaceStorage workspaces,
     ProjectBatchPlanner planner,
     ModernizationPortfolioStore portfolio,
+    UsageQuotaService quotas,
     IHostApplicationLifetime lifetime,
     ILogger<MigrationJobRunner> logger)
 {
@@ -25,6 +26,7 @@ public sealed class MigrationJobRunner(
         string? sourceFingerprint = null)
     {
         var id = Guid.NewGuid().ToString("N");
+        var forceLocal = !quotas.CanUseAi(out _);
         if (projectId is not null && !_activeProjects.TryAdd(projectId, id)) throw new InvalidOperationException("A migration is already running for this project.");
         try
         {
@@ -34,9 +36,9 @@ public sealed class MigrationJobRunner(
             if (projectId is not null)
             {
                 using var scope = scopeFactory.CreateScope(); var migration = scope.ServiceProvider.GetRequiredService<IMigrationService>();
-                portfolio.CreateMigrationRun(projectId, assessmentId, id, strategy, dataAccessStrategy, migration.IsAiConfigured, migration.ProviderName, sourceFingerprint ?? "");
+                portfolio.CreateMigrationRun(projectId, assessmentId, id, strategy, dataAccessStrategy, migration.IsAiConfigured && !forceLocal, migration.ProviderName, sourceFingerprint ?? "");
             }
-            StartRun(id, projectName, targetFramework, files, previous: null, retryFailedOnly: false, forceLocal: false, strategy, dataAccessStrategy);
+            StartRun(id, projectName, targetFramework, files, previous: null, retryFailedOnly: false, forceLocal, strategy, dataAccessStrategy);
             return id;
         }
         catch { if (projectId is not null) _activeProjects.TryRemove(projectId, out _); throw; }
@@ -104,6 +106,8 @@ public sealed class MigrationJobRunner(
         {
             jobs.Update(id, new MigrationProgress(12, $"Reading {files.Count(file => !file.IsSkipped)} persistent source files"));
             await using var scope = scopeFactory.CreateAsyncScope();
+            var portfolioRun = portfolio.FindRunByJob(id);
+            scope.ServiceProvider.GetRequiredService<AiExecutionContext>().Initialize(id, portfolioRun?.ProjectId);
             var migration = scope.ServiceProvider.GetRequiredService<IMigrationService>();
             var progress = new CallbackProgress(value => jobs.Update(id, value));
             void SaveCheckpoint(MigrationResult checkpoint)
@@ -141,8 +145,8 @@ public sealed class MigrationJobRunner(
         finally
         {
             _active.TryRemove(id, out _);
-            var portfolioRun = portfolio.FindRunByJob(id);
-            if (portfolioRun is not null) _activeProjects.TryRemove(portfolioRun.ProjectId, out _);
+            var completedPortfolioRun = portfolio.FindRunByJob(id);
+            if (completedPortfolioRun is not null) _activeProjects.TryRemove(completedPortfolioRun.ProjectId, out _);
             cancellation.Dispose();
         }
     }

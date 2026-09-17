@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using WebFormsMigrator.Services;
 
 namespace WebFormsMigrator.Persistence;
 
-public sealed class MigrationDatabaseInitializer(IDbContextFactory<MigrationDbContext> factory, ILogger<MigrationDatabaseInitializer> logger)
+public sealed class MigrationDatabaseInitializer(IDbContextFactory<MigrationDbContext> factory, ICurrentTenant tenant, ILogger<MigrationDatabaseInitializer> logger)
 {
+    public MigrationDatabaseInitializer(IDbContextFactory<MigrationDbContext> factory, ILogger<MigrationDatabaseInitializer> logger) : this(factory, new StaticCurrentTenant("local"), logger) { }
     public void Initialize()
     {
         using var db = factory.CreateDbContext();
@@ -12,7 +14,7 @@ public sealed class MigrationDatabaseInitializer(IDbContextFactory<MigrationDbCo
         // upgrades them without recreating or deleting Jobs/Batches.
         var statements = new[]
         {
-            "CREATE TABLE IF NOT EXISTS PortfolioWorkspaces (Id TEXT NOT NULL PRIMARY KEY, Name TEXT NOT NULL, Slug TEXT NOT NULL, Description TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL, ArchivedAtUtc TEXT NULL, IsArchived INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS PortfolioWorkspaces (Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL DEFAULT 'local', Name TEXT NOT NULL, Slug TEXT NOT NULL, Description TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL, ArchivedAtUtc TEXT NULL, IsArchived INTEGER NOT NULL)",
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_PortfolioWorkspaces_Slug ON PortfolioWorkspaces (Slug)",
             "CREATE TABLE IF NOT EXISTS Projects (Id TEXT NOT NULL PRIMARY KEY, WorkspaceId TEXT NOT NULL, Name TEXT NOT NULL, Description TEXT NOT NULL, SourceType TEXT NOT NULL, SourceRepositoryUrl TEXT NULL, SourceOwner TEXT NULL, SourceRepositoryName TEXT NULL, SourceBranch TEXT NULL, SourceCommitSha TEXT NULL, ImportedAtUtc TEXT NULL, SourceFingerprint TEXT NULL, DetectedFramework TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL, LastAssessmentAtUtc TEXT NULL, LastMigrationAtUtc TEXT NULL, IsArchived INTEGER NOT NULL, FOREIGN KEY (WorkspaceId) REFERENCES PortfolioWorkspaces(Id) ON DELETE RESTRICT)",
             "CREATE INDEX IF NOT EXISTS IX_Projects_WorkspaceId_Name ON Projects (WorkspaceId, Name)",
@@ -22,21 +24,37 @@ public sealed class MigrationDatabaseInitializer(IDbContextFactory<MigrationDbCo
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_MigrationRuns_JobId ON MigrationRuns (JobId)",
             "CREATE TABLE IF NOT EXISTS ProjectActivities (Id INTEGER NOT NULL CONSTRAINT PK_ProjectActivities PRIMARY KEY AUTOINCREMENT, ProjectId TEXT NOT NULL, EventType TEXT NOT NULL, Description TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL)",
             "CREATE INDEX IF NOT EXISTS IX_ProjectActivities_ProjectId_CreatedAtUtc ON ProjectActivities (ProjectId, CreatedAtUtc)",
+            "CREATE TABLE IF NOT EXISTS AiUsageEvents (Id TEXT NOT NULL PRIMARY KEY, JobId TEXT NULL, ProjectId TEXT NULL, BatchId TEXT NOT NULL, Provider TEXT NOT NULL, Model TEXT NOT NULL, ProcessingMode TEXT NOT NULL, Attempt INTEGER NOT NULL, InputTokens INTEGER NOT NULL, CachedInputTokens INTEGER NOT NULL, OutputTokens INTEGER NOT NULL, DurationMilliseconds INTEGER NOT NULL, EstimatedCostUsd TEXT NOT NULL, Succeeded INTEGER NOT NULL, FailureCode TEXT NULL, RequestFingerprint TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS IX_AiUsageEvents_JobId_CreatedAtUtc ON AiUsageEvents (JobId, CreatedAtUtc)",
+            "CREATE INDEX IF NOT EXISTS IX_AiUsageEvents_ProjectId_CreatedAtUtc ON AiUsageEvents (ProjectId, CreatedAtUtc)",
             "CREATE TABLE IF NOT EXISTS ReframeSchemaVersions (Version INTEGER NOT NULL PRIMARY KEY, AppliedAtUtc TEXT NOT NULL)",
-            "INSERT OR IGNORE INTO ReframeSchemaVersions (Version, AppliedAtUtc) VALUES (1, CURRENT_TIMESTAMP)"
+            "INSERT OR IGNORE INTO ReframeSchemaVersions (Version, AppliedAtUtc) VALUES (1, CURRENT_TIMESTAMP)",
+            "INSERT OR IGNORE INTO ReframeSchemaVersions (Version, AppliedAtUtc) VALUES (2, CURRENT_TIMESTAMP)"
         };
         using var transaction = db.Database.BeginTransaction();
         foreach (var statement in statements) db.Database.ExecuteSqlRaw(statement);
         transaction.Commit();
-        EnsureDefaultWorkspace(db);
-        logger.LogInformation("Reframe database schema initialized at portfolio version {SchemaVersion}", 1);
+
+        // Run legacy ALTER TABLE statements outside EF's schema transaction. This
+        // keeps raw upgrade commands from needing to enlist in that transaction.
+        EnsureColumn(db, "PortfolioWorkspaces", "TenantId", "TEXT NOT NULL DEFAULT 'local'");
+        EnsureDefaultWorkspace(db, tenant.TenantId);
+        logger.LogInformation("Reframe database schema initialized at portfolio version {SchemaVersion}", 2);
     }
 
-    private static void EnsureDefaultWorkspace(MigrationDbContext db)
+    private static void EnsureDefaultWorkspace(MigrationDbContext db, string tenantId)
     {
-        if (db.PortfolioWorkspaces.Any()) return;
+        if (db.PortfolioWorkspaces.Any(item => item.TenantId == tenantId)) return;
         var now = DateTime.UtcNow;
-        db.PortfolioWorkspaces.Add(new WorkspaceRecord { Id = Guid.NewGuid().ToString("N"), Name = "My Workspace", Slug = "my-workspace", Description = "Default local workspace", CreatedAtUtc = now, UpdatedAtUtc = now });
+        db.PortfolioWorkspaces.Add(new WorkspaceRecord { Id = Guid.NewGuid().ToString("N"), TenantId = tenantId, Name = "My Workspace", Slug = $"my-workspace-{tenantId}".ToLowerInvariant(), Description = "Default local workspace", CreatedAtUtc = now, UpdatedAtUtc = now });
         db.SaveChanges();
+    }
+
+    private static void EnsureColumn(MigrationDbContext db, string table, string column, string definition)
+    {
+        using var command = db.Database.GetDbConnection().CreateCommand(); command.CommandText = $"PRAGMA table_info({table})";
+        if (command.Connection!.State != System.Data.ConnectionState.Open) command.Connection.Open();
+        using var reader = command.ExecuteReader(); var found = false; while (reader.Read()) if (reader.GetString(1).Equals(column, StringComparison.OrdinalIgnoreCase)) found = true;
+        reader.Close(); if (!found) { command.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}"; command.ExecuteNonQuery(); }
     }
 }

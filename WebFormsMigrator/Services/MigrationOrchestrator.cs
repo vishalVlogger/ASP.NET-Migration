@@ -12,6 +12,7 @@ public sealed class MigrationOrchestrator(
     AiCompilerRepairService aiRepair,
     MvcStructureValidator mvcValidator,
     ModernizationAssessmentService assessmentService,
+    MigrationQualityEvaluator qualityEvaluator,
     ILogger<MigrationOrchestrator> logger) : IMigrationService
 {
     public bool IsAiConfigured => aiProvider.IsConfigured;
@@ -103,6 +104,8 @@ public sealed class MigrationOrchestrator(
                         batchInfo.Status = "ai-migrated";
                         batchInfo.ModelUsed = batchResult.ProviderModel;
                         batchInfo.AttemptCount = Math.Max(1, batchResult.ProviderAttemptCount);
+                        batchInfo.Usage.AddRange(batchResult.AiUsage);
+                        result.AiUsage.AddRange(batchResult.AiUsage);
                         UpdateCoverage(result, batch, "migrated", batchResult.Files);
                         checkpoint?.Invoke(result);
                         continue;
@@ -134,6 +137,7 @@ public sealed class MigrationOrchestrator(
             result.Build = await VerifyAndClassifyAsync(projectName, targetFramework, result.Files, cancellationToken, result.Coverage);
             if (result.Build.Status == "failed")
                 result.Build = await aiRepair.RepairAsync(result, result.Build, cancellationToken, progress, checkpoint);
+            result.Quality = qualityEvaluator.Evaluate(result);
             checkpoint?.Invoke(result);
             return result;
         }
@@ -146,6 +150,7 @@ public sealed class MigrationOrchestrator(
         progress?.Report(new(58, $"Scaffolding all {analysis.PageCount} Web Forms pages locally"));
         progress?.Report(new(88, "Compiling generated ASP.NET Core project"));
         baseline.Build = await VerifyAndClassifyAsync(projectName, targetFramework, baseline.Files, cancellationToken, baseline.Coverage);
+        baseline.Quality = qualityEvaluator.Evaluate(baseline);
         checkpoint?.Invoke(baseline);
         return baseline;
     }

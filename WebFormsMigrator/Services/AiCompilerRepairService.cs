@@ -73,6 +73,7 @@ public sealed class AiCompilerRepairService(
                         cancellationToken);
                     sanitizer.NormalizePaths(repaired.Files, result.ProjectName);
                     sanitizer.Repair(repaired.Files);
+                    result.AiUsage.AddRange(repaired.AiUsage);
                     foreach (var existing in group)
                     {
                         var replacement = repaired.Files.FirstOrDefault(file =>

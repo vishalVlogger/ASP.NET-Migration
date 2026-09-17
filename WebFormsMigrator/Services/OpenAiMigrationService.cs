@@ -26,6 +26,8 @@ public sealed class OpenAiMigrationService(HttpClient httpClient, IOptions<OpenA
         request.Content = JsonContent.Create(new
         {
             model = _options.Model,
+            store = false,
+            prompt_cache_key = $"reframe-webforms-{batch.Kind}",
             instructions = SystemPrompt,
             input = BuildInput(projectName, targetFramework, batch, projectSourcePaths, dependencyOutputs, analysis),
             text = new
@@ -59,6 +61,15 @@ public sealed class OpenAiMigrationService(HttpClient httpClient, IOptions<OpenA
 
         var result = JsonSerializer.Deserialize<MigrationResult>(text.GetString()!, JsonOptions)
                      ?? throw new InvalidOperationException("The model returned invalid migration JSON.");
+        if (document.RootElement.TryGetProperty("usage", out var usage))
+        {
+            result.ProviderUsage = new AiInvocationUsage
+            {
+                InputTokens = usage.TryGetProperty("input_tokens", out var input) ? input.GetInt64() : 0,
+                CachedInputTokens = usage.TryGetProperty("input_tokens_details", out var details) && details.TryGetProperty("cached_tokens", out var cached) ? cached.GetInt64() : 0,
+                OutputTokens = usage.TryGetProperty("output_tokens", out var output) ? output.GetInt64() : 0
+            };
+        }
         result.Id = Guid.NewGuid().ToString("N");
         return result;
     }

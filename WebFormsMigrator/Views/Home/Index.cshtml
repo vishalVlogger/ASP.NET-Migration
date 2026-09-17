@@ -128,8 +128,7 @@
     var skippedSources = result.Coverage.Count(item => item.Status == "skipped");
     var pendingSources = result.Coverage.Count(item => item.Status == "pending");
     var incompleteSources = fallbackSources + skippedSources + pendingSources;
-    var isReady = result.Build.Status == "passed" && fallbackBatches == 0 && incompleteSources == 0 &&
-                  result.Build.UnresolvedMigrationCount == 0 && result.Build.StructureIssueCount == 0;
+    var isReady = result.Quality.Classification == "Ready for behavioral testing";
     <section class="results" id="results" data-result-id="@result.Id"
              data-save-url="@Url.Action("SaveFile", "Home")"
              data-regenerate-url="@Url.Action("RegenerateFile", "Home")">
@@ -142,20 +141,29 @@
             <a asp-action="Download" asp-route-id="@result.Id" class="download-button">@(isReady ? "Download verified ZIP ↓" : "Download review ZIP ↓")</a>
         </div>
 
-        <div class="readiness-banner @(isReady ? "ready" : "review")">
+        <nav class="result-workspace-nav" aria-label="Migration result sections">
+            <a href="#quality">Quality</a><a href="#assessment">Assessment</a><a href="#validation">Validation</a><a href="#coverage">Coverage</a><a href="#generated-code">Generated code</a><a href="#ai-usage">AI usage</a>
+        </nav>
+
+        <div class="readiness-banner @(isReady ? "ready" : "review")" id="quality">
             <div>
-                <span class="readiness-label">Release readiness</span>
-                <strong>@(isReady ? "Ready for your acceptance tests" : "Human review is still required")</strong>
+                <span class="readiness-label">Migration quality: @result.Quality.Score/100</span>
+                <strong>@result.Quality.Classification</strong>
             </div>
             <p>@(isReady
-                ? "Every batch was AI-migrated, the project builds, and no unresolved migration markers were detected."
+                ? "The generated project builds and passes structural and source-coverage gates. Behavioral equivalence still requires your acceptance tests."
                 : $"{incompleteSources} source file(s) remain incomplete, with {result.Build.UnresolvedMigrationCount} unresolved marker(s), {result.Build.StructureIssueCount} MVC issue(s), and {result.Build.ErrorCount} build error(s).")</p>
+            @if (result.Quality.Gates.Count > 0)
+            {
+                <ul>@foreach (var gate in result.Quality.Gates) { <li>@gate</li> }</ul>
+            }
         </div>
 
-        <partial name="_AssessmentDashboard" model="result" />
+        <div id="assessment"><partial name="_AssessmentDashboard" model="result" /></div>
 
         <div class="stats result-stats">
             <div><strong>@result.Analysis.PageCount</strong><span>Pages</span></div>
+            <div><strong>@result.Quality.Score</strong><span>Quality score</span></div>
             <div><strong>@aiBatches</strong><span>AI batches</span></div>
             <div class="@(fallbackBatches > 0 ? "attention" : "")"><strong>@fallbackBatches</strong><span>Fallback batches</span></div>
             <div class="@(result.Build.UnresolvedMigrationCount > 0 ? "attention" : "")"><strong>@result.Build.UnresolvedMigrationCount</strong><span>Unresolved markers</span></div>
@@ -163,7 +171,7 @@
             <div><strong>@result.Files.Count</strong><span>Generated files</span></div>
         </div>
 
-        <section class="build-report @result.Build.Status">
+        <section class="build-report @result.Build.Status" id="validation">
             <div class="build-icon">@(result.Build.Status == "passed" ? "✓" : result.Build.Status is "failed" or "incomplete" ? "!" : "?")</div>
             <div class="build-content">
                 <div class="build-heading">
@@ -193,8 +201,17 @@
             </div>
         </section>
 
+        @if (result.AiUsage.Count > 0)
+        {
+            <section class="ai-usage-summary" id="ai-usage"><div><span class="eyebrow">Inference accounting</span><h3>AI usage</h3></div><div><b>@result.AiUsage.Count</b><span>invocations</span></div><div><b>@result.AiUsage.Sum(item => item.InputTokens).ToString("N0")</b><span>input tokens</span></div><div><b>@result.AiUsage.Sum(item => item.OutputTokens).ToString("N0")</b><span>output tokens</span></div><div><b>$@result.AiUsage.Sum(item => item.EstimatedCostUsd).ToString("0.0000")</b><span>estimated cost</span></div></section>
+        }
+        else
+        {
+            <div id="ai-usage" class="sr-only">No AI usage was recorded for this migration.</div>
+        }
+
         <div class="result-grid">
-            <div class="result-column">
+            <div class="result-column" id="coverage">
                 <h3>Migration plan</h3>
                 <ol class="steps">
                     @foreach (var step in result.Steps) { <li>@step</li> }
@@ -269,7 +286,7 @@
                     </details>
                 }
             </div>
-            <div class="result-column files-column">
+            <div class="result-column files-column" id="generated-code">
                 <div class="project-tree">
                     <div class="tree-heading"><h3>Target project structure</h3><button type="button" class="copy-tree">Copy tree</button></div>
                     <p>Place each generated file at the exact path shown below.</p>

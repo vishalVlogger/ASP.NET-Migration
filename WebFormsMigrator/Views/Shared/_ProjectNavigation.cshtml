@@ -1,0 +1,11 @@
+@model ProjectNavigationViewModel
+<nav class="project-tabs" aria-label="Project navigation">
+    <a asp-controller="Projects" asp-action="Details" asp-route-id="@Model.ProjectId" class="@(Model.Active == "overview" ? "active" : null)" aria-current="@(Model.Active == "overview" ? "page" : null)">Overview</a>
+    <a asp-controller="Projects" asp-action="Assessments" asp-route-projectId="@Model.ProjectId" class="@(Model.Active == "assessments" ? "active" : null)" aria-current="@(Model.Active == "assessments" ? "page" : null)">Assessments</a>
+    <a asp-controller="Projects" asp-action="Details" asp-route-id="@Model.ProjectId" asp-fragment="migration-history" class="@(Model.Active == "migrations" ? "active" : null)">Migration runs</a>
+    @if (Model.LatestAssessmentId is not null)
+    {
+        <a asp-controller="Projects" asp-action="Assessment" asp-route-projectId="@Model.ProjectId" asp-route-assessmentId="@Model.LatestAssessmentId" class="@(Model.Active == "report" ? "active" : null)" aria-current="@(Model.Active == "report" ? "page" : null)">Latest report</a>
+    }
+    <a asp-controller="Projects" asp-action="Settings" asp-route-id="@Model.ProjectId" class="@(Model.Active == "settings" ? "active" : null)" aria-current="@(Model.Active == "settings" ? "page" : null)">Settings</a>
+</nav>

@@ -1,3 +1,6 @@
+@using WebFormsMigrator.Services
+@inject ICurrentTenant CurrentTenant
+@inject ISubscriptionProvider Subscriptions
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,16 +14,24 @@
     <link rel="stylesheet" href="~/css/portfolio.css" asp-append-version="true" />
 </head>
 <body>
+    @{ var controller = ViewContext.RouteData.Values["controller"]?.ToString(); var subscription = Subscriptions.GetCurrent(); var settingsActive = controller is "AiSettings" or "Commercial" or "SystemSettings"; }
     <a class="skip-link" href="#main-content">Skip to main content</a>
     <header class="site-header">
-        <a asp-controller="Home" asp-action="Index" class="brand"><span>{</span> reframe <span>}</span></a>
-        <nav class="header-right" aria-label="Primary navigation">
-            <span>ASP.NET modernization</span>
-            <a asp-controller="Workspaces" asp-action="Index">Workspaces</a>
-            <a asp-controller="Home" asp-action="Dashboard">Migrations</a>
-            <a asp-controller="Projects" asp-action="Create" class="header-cta">Create project</a>
+        <a asp-controller="Overview" asp-action="Index" class="brand"><span>{</span> reframe <span>}</span></a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span></span><span></span><span></span><b class="sr-only">Open navigation</b></button>
+        <nav id="primary-navigation" class="header-right" aria-label="Primary navigation">
+            <a asp-controller="Overview" asp-action="Index" class="@(controller == "Overview" ? "active" : null)" aria-current="@(controller == "Overview" ? "page" : null)">Overview</a>
+            <a asp-controller="Workspaces" asp-action="Index" class="@(controller is "Workspaces" or "Projects" ? "active" : null)" aria-current="@(controller is "Workspaces" or "Projects" ? "page" : null)">Workspaces</a>
+            <a asp-controller="Home" asp-action="Dashboard" class="@(controller == "Home" ? "active" : null)" aria-current="@(controller == "Home" ? "page" : null)">Migration queue</a>
+            <details class="settings-menu">
+                <summary class="@(settingsActive ? "active" : null)">Settings</summary>
+                <div><a asp-controller="AiSettings" asp-action="Index">AI providers</a><a asp-controller="Commercial" asp-action="Index">Plan &amp; usage</a><a asp-controller="SystemSettings" asp-action="Index">Security &amp; storage</a><span>@CurrentTenant.TenantId · @subscription.Plan</span>@if (User.Identity?.IsAuthenticated == true) { <form asp-controller="Access" asp-action="Logout" method="post"><button type="submit">Sign out</button></form> }</div>
+            </details>
+            <a asp-controller="Projects" asp-action="Create" class="header-cta">New project</a>
         </nav>
     </header>
+    @if (TempData["Notice"] is string globalNotice) { <div class="global-toast success" role="status"><span>@globalNotice</span><button type="button" aria-label="Dismiss notification">×</button></div> }
+    @if (TempData["Error"] is string globalError) { <div class="global-toast error" role="alert"><span>@globalError</span><button type="button" aria-label="Dismiss notification">×</button></div> }
     <main id="main-content">@RenderBody()</main>
     <footer><span>Built for deliberate migrations.</span><span>Review generated code before production use.</span></footer>
     <script src="~/lib/jquery/dist/jquery.min.js"></script>

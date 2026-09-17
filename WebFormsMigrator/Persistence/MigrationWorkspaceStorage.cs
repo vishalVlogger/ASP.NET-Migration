@@ -6,7 +6,19 @@ using WebFormsMigrator.Models;
 
 namespace WebFormsMigrator.Persistence;
 
-public sealed class MigrationWorkspaceStorage
+public interface IMigrationWorkspaceStorage
+{
+    string CreateWorkspace(string jobId, IReadOnlyCollection<SourceFile> sources);
+    List<SourceFile> LoadSources(string jobId);
+    void SaveProjectSources(string projectId, IReadOnlyCollection<SourceFile> sources);
+    List<SourceFile> LoadProjectSources(string projectId);
+    void SaveResult(string jobId, MigrationResult result);
+    void SaveResultIndex(MigrationResult result);
+    MigrationResult? LoadResult(string resultId);
+    void DeleteWorkspace(string jobId, string? resultId);
+}
+
+public sealed class MigrationWorkspaceStorage : IMigrationWorkspaceStorage
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly ConcurrentDictionary<string, object> _writeLocks = new(StringComparer.OrdinalIgnoreCase);

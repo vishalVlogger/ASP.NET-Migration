@@ -57,6 +57,15 @@ public sealed class GeminiMigrationService(HttpClient httpClient, IOptions<Gemin
 
         var result = JsonSerializer.Deserialize<MigrationResult>(text, JsonOptions)
                      ?? throw new InvalidOperationException("Gemini returned invalid migration JSON.");
+        if (document.RootElement.TryGetProperty("usageMetadata", out var usage))
+        {
+            result.ProviderUsage = new AiInvocationUsage
+            {
+                InputTokens = usage.TryGetProperty("promptTokenCount", out var input) ? input.GetInt64() : 0,
+                CachedInputTokens = usage.TryGetProperty("cachedContentTokenCount", out var cached) ? cached.GetInt64() : 0,
+                OutputTokens = usage.TryGetProperty("candidatesTokenCount", out var output) ? output.GetInt64() : 0
+            };
+        }
         result.Id = Guid.NewGuid().ToString("N");
         return result;
     }

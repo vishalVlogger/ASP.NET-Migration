@@ -2,10 +2,11 @@
 
 Reframe is a local-first ASP.NET Core modernization platform. It accepts a classic ASP.NET Web Forms project ZIP—or individual source files—produces an evidence-backed migration readiness assessment, identifies risks, scaffolds an ASP.NET Core MVC target, and compiles the generated project. AI is an optional accelerator, never a startup or analysis requirement.
 
-It has two operating modes:
+It has three operating modes:
 
 - **Local structural migration:** works without credentials, scaffolds every Web Forms page and user control, and creates a source-to-target coverage inventory.
-- **AI migration:** when `OPENAI_API_KEY` is present, sends the supplied source to the OpenAI Responses API with a strict structured-output schema and generates a semantic vertical slice.
+- **Private local AI:** connects to a loopback OpenAI-compatible server such as Ollama or LM Studio, so source code can remain on the user's machine.
+- **Managed cloud AI:** OpenAI, Gemini, and OpenRouter are optional semantic accelerators. Provider use, tokens, latency, cache hits, and estimated cost are recorded per job and project.
 - **Live progress:** asynchronous jobs report real analysis, conversion, validation, and packaging stages in the browser.
 - **Build verification:** generated projects are compiled automatically and compiler diagnostics link back to individual migrated files.
 - **Completion pipeline:** the actual generated `.csproj` is built, compiler failures can be sent through multiple AI repair rounds, and MVC structure is validated before a package is marked ready.
@@ -85,6 +86,20 @@ dotnet user-secrets set "AI:MaxRepairRounds" "2"
 
 With `AI__Provider=Auto` (the default), provider priority is OpenAI, Gemini, then OpenRouter. Set `AI__Provider` to `Gemini`, `OpenAI`, or `OpenRouter` for deterministic selection. Never store provider keys in `appsettings.json` or source control.
 
+For private local AI, expose an OpenAI-compatible API on loopback and configure it without an API key:
+
+```powershell
+$env:AI__Provider = "LocalAI"
+$env:LocalAI__Enabled = "true"
+$env:LocalAI__Endpoint = "http://127.0.0.1:11434/v1/"
+$env:LocalAI__Model = "gpt-oss:20b"
+dotnet run --project .\WebFormsMigrator\WebFormsMigrator.csproj
+```
+
+Plain HTTP is accepted only for loopback endpoints. A remote local-model server must be explicitly allowed and use HTTPS. Reframe does not ship a custom model: the practical product path is an interchangeable provider layer with downloadable, independently licensed models rather than the cost and maintenance burden of training a migration foundation model.
+
+Set `AI__RoutingMode=RiskAware` to send small, low-risk batches to `AI__LowRiskProvider` and large, compiler-repair, or warning-heavy batches to `AI__HighRiskProvider`. Successful batch results are cached by provider, model, prompt, and full input fingerprint. OpenAI Responses requests set `store=false`.
+
 ## Fully functional local / no-AI mode
 
 An API key is not required to process the whole ZIP. Local mode creates an MVC controller and Razor view for every `.aspx` page, a shared partial for every `.ascx`, a layout for master-page usage, and `Migration/SourceInventory.md` covering every accepted source file.
@@ -118,6 +133,10 @@ Validate
 ↓
 Download
 ```
+
+The root page is the portfolio overview: recent projects, runs requiring review, active migration progress, plan identity, and current-month AI cost are visible without opening individual workspaces. Primary navigation is organized around Overview, Workspaces, Migration queue, and Settings. Project pages use a persistent tab bar for overview, assessments, migration runs, reports, and settings.
+
+Project onboarding progressively separates source selection, project identity, and advanced migration options. Migration results provide sticky navigation across quality gates, assessment, validation, source coverage, generated code, and AI usage. At mobile breakpoints the primary navigation collapses into an accessible menu and wide historical data remains horizontally navigable.
 
 Workspaces and projects can be archived and restored without deleting assessment or migration history. Project lists support server-side name search, source/risk filters, active/archived views, and sorting.
 
@@ -153,17 +172,21 @@ dotnet build .\WebFormsMigrator.slnx
 - `MigrationEffortEstimator` returns planning ranges and primary evidence-based effort drivers.
 - `MigrationReportExporter` creates source-safe Markdown and JSON technical reports.
 - `MigrationOrchestrator` runs dependency batches, source coverage, completion classification, and safe local fallback.
+- `MigrationQualityEvaluator` applies deterministic build, structure, source-coverage, and unresolved-marker gates; “ready” means ready for behavioral testing, not proven equivalence.
+- `AiUsageAccounting` records provider/model identity, tokens, latency, attempts, failures, cache hits, and estimated cost without retaining prompts.
+- `AiBatchCache` avoids repeat inference for identical batch inputs and prompts.
 - `OpenAiMigrationService` uses the Responses API and strict JSON Schema output.
+- `LocalAiMigrationService` supports loopback OpenAI-compatible model servers with explicit remote-endpoint safeguards.
 - `OpenRouterMigrationService` uses an ordered, failure-aware model pool.
 - `GeneratedProjectVerifier` builds the actual generated project rather than a synthetic verification project.
 - `AiCompilerRepairService` feeds compiler errors back to AI for bounded repair rounds.
 - `MvcStructureValidator` checks MVC registration, routes, controllers, views, services, configuration, and static assets.
 - `MigrationResultStore` persists generated packages and explicit file review state.
-- `ModernizationPortfolioStore` persists workspaces, projects, immutable assessments, linked migration runs, and lightweight activity records in the existing SQLite database.
+- `ModernizationPortfolioStore` persists tenant-scoped workspaces, projects, immutable assessments, linked migration runs, and lightweight activity records in the existing SQLite database.
 - `SourceFingerprintService` provides stable source-change detection; `AssessmentComparisonService` diffs rule-and-path identities as new, resolved, changed, or unchanged.
 - `GitHubRepositoryImportService` validates public GitHub identity and delegates transport to a mockable client before using the shared archive reader.
 
-The lightweight domain also defines `Workspace`, `ModernizationProject`, `MigrationRun`, `Assessment`, and `MigrationArtifact` concepts for future multi-tenant evolution. `IFeatureEntitlementService` provides a single future plan boundary; all existing local features remain enabled. No billing or tenant-isolation claim is made in this version.
+`IFeatureEntitlementService`, `UsageQuotaService`, and `ISubscriptionProvider` provide plan, quota, and future payment-provider boundaries. `IMigrationWorkspaceStorage` separates artifact storage from controllers and jobs so object storage can be added without changing the migration pipeline.
 
 ## Database evolution and storage
 
@@ -179,6 +202,20 @@ Assessment metadata and reports are retained indefinitely. Generated migration a
 
 Data access can be assessed as Preserve ADO.NET, Dapper, EF Core, or Analyse Only. Stored procedures, dynamic SQL, adapters, and schema-dependent operations are never presented as safe automatic EF Core rewrites.
 
+## Authentication, plans, and commercial boundary
+
+Local development remains anonymous by default. To protect a deployed single-node instance, enable cookie authentication and supply the administrator password only through an environment variable:
+
+```powershell
+$env:Access__RequireAuthentication = "true"
+$env:Access__AdminUsername = "admin"
+$env:REFRAME_ADMIN_PASSWORD = "use-a-secret-manager-value"
+```
+
+`Commercial:Plan` supports Development, Community, Solo, Pro, Team, and Enterprise policy profiles. Workspace/project limits, paid feature gates, and an optional `Commercial:MonthlyAiBudgetUsd` are enforced in application services. The Plan screen reports entitlements and monthly estimated AI cost. No payment is collected: a billing provider must replace the configuration-backed `ISubscriptionProvider` before selling subscriptions.
+
+Tenant IDs are enforced for workspace and project access. The current cookie login is intentionally a single-node deployment baseline, not a complete hosted identity system. A public SaaS launch still requires an external identity provider, per-tenant database hardening, object storage, distributed workers/queues, audited role management, observability, backups, and a payment processor.
+
 ## Commercial roadmap
 
 ### Free / local capabilities (implemented)
@@ -190,16 +227,19 @@ Data access can be assessed as Preserve ADO.NET, Dapper, EF Core, or Analyse Onl
 - Generated-project compilation and repair workflow
 - Optional configured AI providers
 
-### Future hosted capabilities (not implemented)
+### Productization foundations (implemented)
 
-- Managed project storage and larger hosted workloads
-- GitHub import and hosted migration-run history
-- Subscription plans and usage entitlements
+- Local-AI and cloud-AI provider choices with risk routing and caching
+- Per-invocation usage/cost accounting and configurable monthly AI budgets
+- Tenant-scoped portfolio access and optional cookie authentication
+- Configuration-backed plans, feature entitlements, and workspace/project quotas
+- Storage and subscription interfaces for production adapters
 
 ### Future team capabilities (not implemented)
 
 - Multi-user workspaces, roles, review assignments, and audit history
 - Shared migration findings and approval workflows
+- Production identity, payment processing, object storage, and distributed job workers
 
 ## Testing and CI
 

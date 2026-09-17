@@ -62,6 +62,42 @@ public sealed class MigrationResult
     public ModernizationStrategy Strategy { get; set; } = ModernizationStrategy.BalancedModernization;
     public DataAccessStrategy DataAccessStrategy { get; set; } = DataAccessStrategy.AnalyseOnly;
     public MigrationReadinessReport? ReadinessReport { get; set; }
+    public AiInvocationUsage? ProviderUsage { get; set; }
+    public List<AiInvocationUsage> AiUsage { get; set; } = [];
+    public MigrationQualityEvaluation Quality { get; set; } = new();
+}
+
+public sealed class MigrationQualityEvaluation
+{
+    public int Score { get; set; }
+    public bool BuildPassed { get; set; }
+    public bool StructurePassed { get; set; }
+    public decimal CoveredSourcePercentage { get; set; }
+    public int UnresolvedCount { get; set; }
+    public string Classification { get; set; } = "Not evaluated";
+    public List<string> Gates { get; set; } = [];
+    public DateTime EvaluatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class AiInvocationUsage
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string? JobId { get; set; }
+    public string? ProjectId { get; set; }
+    public string BatchId { get; set; } = "";
+    public string Provider { get; set; } = "";
+    public string Model { get; set; } = "";
+    public string ProcessingMode { get; set; } = "cloud";
+    public int Attempt { get; set; } = 1;
+    public long InputTokens { get; set; }
+    public long CachedInputTokens { get; set; }
+    public long OutputTokens { get; set; }
+    public long DurationMilliseconds { get; set; }
+    public decimal EstimatedCostUsd { get; set; }
+    public bool Succeeded { get; set; }
+    public string? FailureCode { get; set; }
+    public string RequestFingerprint { get; set; } = "";
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class SourceMigrationCoverage
@@ -86,6 +122,7 @@ public sealed class MigrationBatchInfo
     public string Status { get; set; } = "pending";
     public string? ModelUsed { get; set; }
     public int AttemptCount { get; set; }
+    public List<AiInvocationUsage> Usage { get; set; } = [];
 }
 
 public sealed class GeneratedFile

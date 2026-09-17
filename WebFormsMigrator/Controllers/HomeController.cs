@@ -13,7 +13,7 @@ public sealed class HomeController(
     MigrationResultStore resultStore,
     MigrationJobRunner jobRunner,
     MigrationJobStore jobStore,
-    MigrationWorkspaceStorage workspaces,
+    IMigrationWorkspaceStorage workspaces,
     GeneratedProjectVerifier verifier,
     GeneratedOutputSanitizer sanitizer,
     MvcStructureValidator mvcValidator,

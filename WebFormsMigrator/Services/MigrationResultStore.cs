@@ -4,7 +4,7 @@ using WebFormsMigrator.Persistence;
 
 namespace WebFormsMigrator.Services;
 
-public sealed class MigrationResultStore(IMemoryCache cache, MigrationWorkspaceStorage storage)
+public sealed class MigrationResultStore(IMemoryCache cache, IMigrationWorkspaceStorage storage)
 {
     public void Set(MigrationResult result, string? jobId = null)
     {

@@ -11,6 +11,7 @@ public sealed class MigrationDbContext(DbContextOptions<MigrationDbContext> opti
     public DbSet<AssessmentRecord> Assessments => Set<AssessmentRecord>();
     public DbSet<MigrationRunRecord> MigrationRuns => Set<MigrationRunRecord>();
     public DbSet<ProjectActivityRecord> ProjectActivities => Set<ProjectActivityRecord>();
+    public DbSet<AiUsageRecord> AiUsageEvents => Set<AiUsageRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -31,12 +32,15 @@ public sealed class MigrationDbContext(DbContextOptions<MigrationDbContext> opti
         modelBuilder.Entity<MigrationRunRecord>().HasIndex(item => item.JobId).IsUnique();
         modelBuilder.Entity<ProjectActivityRecord>().ToTable("ProjectActivities").HasKey(item => item.Id);
         modelBuilder.Entity<ProjectActivityRecord>().HasIndex(item => new { item.ProjectId, item.CreatedAtUtc });
+        modelBuilder.Entity<AiUsageRecord>().ToTable("AiUsageEvents").HasKey(item => item.Id);
+        modelBuilder.Entity<AiUsageRecord>().HasIndex(item => new { item.JobId, item.CreatedAtUtc });
+        modelBuilder.Entity<AiUsageRecord>().HasIndex(item => new { item.ProjectId, item.CreatedAtUtc });
     }
 }
 
 public sealed class WorkspaceRecord
 {
-    public string Id { get; set; } = ""; public string Name { get; set; } = ""; public string Slug { get; set; } = "";
+    public string Id { get; set; } = ""; public string TenantId { get; set; } = "local"; public string Name { get; set; } = ""; public string Slug { get; set; } = "";
     public string Description { get; set; } = ""; public DateTime CreatedAtUtc { get; set; } public DateTime UpdatedAtUtc { get; set; }
     public DateTime? ArchivedAtUtc { get; set; } public bool IsArchived { get; set; }
 }
@@ -74,6 +78,16 @@ public sealed class ProjectActivityRecord
 {
     public long Id { get; set; } public string ProjectId { get; set; } = ""; public string EventType { get; set; } = "";
     public string Description { get; set; } = ""; public DateTime CreatedAtUtc { get; set; }
+}
+
+public sealed class AiUsageRecord
+{
+    public string Id { get; set; } = ""; public string? JobId { get; set; } public string? ProjectId { get; set; }
+    public string BatchId { get; set; } = ""; public string Provider { get; set; } = ""; public string Model { get; set; } = "";
+    public string ProcessingMode { get; set; } = "cloud"; public int Attempt { get; set; } public long InputTokens { get; set; }
+    public long CachedInputTokens { get; set; } public long OutputTokens { get; set; } public long DurationMilliseconds { get; set; }
+    public decimal EstimatedCostUsd { get; set; } public bool Succeeded { get; set; } public string? FailureCode { get; set; }
+    public string RequestFingerprint { get; set; } = ""; public DateTime CreatedAtUtc { get; set; }
 }
 
 public sealed class MigrationJobRecord

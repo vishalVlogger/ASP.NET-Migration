@@ -8,7 +8,7 @@ namespace WebFormsMigrator.Controllers;
 [Route("Projects")]
 public sealed class ProjectsController(
     ModernizationPortfolioStore store,
-    MigrationWorkspaceStorage sourceStorage,
+    IMigrationWorkspaceStorage sourceStorage,
     SourceArchiveReader archiveReader,
     GitHubRepositoryImportService github,
     SourceFingerprintService fingerprints,
@@ -16,15 +16,25 @@ public sealed class ProjectsController(
     AssessmentComparisonService comparisons,
     MigrationReportExporter reportExporter,
     MigrationJobRunner migrations,
+    AiUsageStore aiUsage,
+    IFeatureEntitlementService entitlements,
+    UsageQuotaService quotas,
     ILogger<ProjectsController> logger) : Controller
 {
     [HttpGet("Create")]
-    public IActionResult Create(string? workspaceId = null) => View(new CreateProjectViewModel { WorkspaceId = workspaceId ?? store.ListWorkspaces().First().Id, Workspaces = store.ListWorkspaces() });
+    public IActionResult Create(string? workspaceId = null)
+    {
+        if (!quotas.CanCreateProject(out var reason)) { TempData["Error"] = reason; return RedirectToAction("Index", "Workspaces"); }
+        var workspaces = store.ListWorkspaces();
+        return View(new CreateProjectViewModel { WorkspaceId = workspaceId ?? workspaces.First().Id, Workspaces = workspaces });
+    }
 
     [HttpPost("Create"), ValidateAntiForgeryToken, RequestSizeLimit(SourceArchiveReader.MaxArchiveBytes + 1024 * 1024)]
     public async Task<IActionResult> Create(CreateProjectViewModel model, CancellationToken cancellationToken)
     {
         model.Workspaces = store.ListWorkspaces();
+        if (!quotas.CanCreateProject(out var quotaReason)) { ModelState.AddModelError(string.Empty, quotaReason); return View(model); }
+        if (model.SourceType.Equals("GitHub", StringComparison.OrdinalIgnoreCase) && !entitlements.IsEnabled(ProductFeature.GitHubImport)) { ModelState.AddModelError(nameof(model.SourceType), "GitHub import is not included in this plan."); return View(model); }
         if (!model.SourceType.Equals("Upload", StringComparison.OrdinalIgnoreCase) && !model.SourceType.Equals("GitHub", StringComparison.OrdinalIgnoreCase)) ModelState.AddModelError(nameof(model.SourceType), "Choose Upload or GitHub.");
         if (!ModelState.IsValid) return View(model);
         try
@@ -54,7 +64,7 @@ public sealed class ProjectsController(
     public IActionResult Details(string id)
     {
         var project = store.GetProject(id); if (project is null) return NotFound();
-        return View(new ProjectDashboardViewModel { Project = project, LatestAssessment = store.GetLatestAssessment(id), Assessments = store.ListAssessments(id), MigrationRuns = store.ListMigrationRuns(id), Activities = store.ListActivities(id) });
+        return View(new ProjectDashboardViewModel { Project = project, LatestAssessment = store.GetLatestAssessment(id), Assessments = store.ListAssessments(id), MigrationRuns = store.ListMigrationRuns(id), Activities = store.ListActivities(id), AiUsage = aiUsage.ListForProject(id) });
     }
 
     [HttpGet("{id}/Settings")]
@@ -100,6 +110,7 @@ public sealed class ProjectsController(
     public IActionResult Migrate(string id)
     {
         var project = store.GetProject(id); var assessment = store.GetLatestAssessment(id); if (project is null) return NotFound(); if (assessment is null) return BadRequest(); var sources = sourceStorage.LoadProjectSources(id); if (sources.Count == 0) return BadRequest();
+        if (!quotas.CanUseAi(out var quotaReason)) TempData["Notice"] = quotaReason + " The deterministic local migration will still be used.";
         try
         {
             var jobId = migrations.Start(project.Name, "net10.0", sources, assessment.Report.Strategy, assessment.Report.DataAccessStrategy, project.Id, assessment.Id, assessment.SourceFingerprint);
@@ -109,7 +120,7 @@ public sealed class ProjectsController(
     }
 
     [HttpGet("{projectId}/Assessments")]
-    public IActionResult Assessments(string projectId) { var project = store.GetProject(projectId); return project is null ? NotFound() : View(new AssessmentHistoryViewModel { Project = project, Assessments = store.ListAssessments(projectId) }); }
+    public IActionResult Assessments(string projectId) { if (!entitlements.IsEnabled(ProductFeature.AssessmentHistory)) return StatusCode(403); var project = store.GetProject(projectId); return project is null ? NotFound() : View(new AssessmentHistoryViewModel { Project = project, Assessments = store.ListAssessments(projectId) }); }
 
     [HttpGet("{projectId}/Assessments/{assessmentId}")]
     public IActionResult Assessment(string projectId, string assessmentId) { var item = store.GetAssessment(assessmentId); return item is null || item.ProjectId != projectId ? NotFound() : View(item); }
@@ -125,6 +136,7 @@ public sealed class ProjectsController(
     [HttpGet("{projectId}/Assessments/Compare")]
     public IActionResult Compare(string projectId, string left, string right)
     {
+        if (!entitlements.IsEnabled(ProductFeature.AssessmentComparison)) return StatusCode(403);
         var before = store.GetAssessment(left); var after = store.GetAssessment(right); if (before is null || after is null || before.ProjectId != projectId || after.ProjectId != projectId) return NotFound(); return View(comparisons.Compare(before, after));
     }
 
