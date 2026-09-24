@@ -364,6 +364,15 @@ public sealed class {{name}}Controller : Controller
     private static string ConvertMarkup(string source, string title, bool isPartial)
     {
         var markup = DirectiveRegex().Replace(source, "");
+        var body = BodyContentRegex().Match(markup);
+        if (body.Success) markup = body.Groups["content"].Value;
+        else
+        {
+            markup = DocumentHeadRegex().Replace(markup, "");
+            markup = DocumentShellTagRegex().Replace(markup, "");
+        }
+        markup = DoctypeRegex().Replace(markup, "");
+        markup = FormTagRegex().Replace(markup, "");
         markup = ContentTagRegex().Replace(markup, "");
         markup = LabelRegex().Replace(markup, match => $"<span id=\"{Attribute(match.Value, "ID")}\">{WebUtility.HtmlEncode(Attribute(match.Value, "Text"))}</span>");
         markup = TextBoxRegex().Replace(markup, match => $"<input id=\"{Attribute(match.Value, "ID")}\" name=\"{Attribute(match.Value, "ID")}\" value=\"{WebUtility.HtmlEncode(Attribute(match.Value, "Text"))}\" />");
@@ -423,6 +432,11 @@ public sealed class {{name}}Controller : Controller
     }
 
     [GeneratedRegex(@"<%@.*?%>", RegexOptions.IgnoreCase | RegexOptions.Singleline)] private static partial Regex DirectiveRegex();
+    [GeneratedRegex(@"<!doctype\b[^>]*>", RegexOptions.IgnoreCase)] private static partial Regex DoctypeRegex();
+    [GeneratedRegex(@"<body\b[^>]*>(?<content>.*?)</body\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline)] private static partial Regex BodyContentRegex();
+    [GeneratedRegex(@"<head\b[^>]*>.*?</head\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline)] private static partial Regex DocumentHeadRegex();
+    [GeneratedRegex(@"</?(?:html|head|body)\b[^>]*>", RegexOptions.IgnoreCase)] private static partial Regex DocumentShellTagRegex();
+    [GeneratedRegex(@"</?form\b[^>]*>", RegexOptions.IgnoreCase)] private static partial Regex FormTagRegex();
     [GeneratedRegex(@"</?asp:Content\b[^>]*>", RegexOptions.IgnoreCase)] private static partial Regex ContentTagRegex();
     [GeneratedRegex(@"<asp:Label\b[^>]*(?:/>|>.*?</asp:Label>)", RegexOptions.IgnoreCase | RegexOptions.Singleline)] private static partial Regex LabelRegex();
     [GeneratedRegex(@"<asp:TextBox\b[^>]*(?:/>|>.*?</asp:TextBox>)", RegexOptions.IgnoreCase | RegexOptions.Singleline)] private static partial Regex TextBoxRegex();

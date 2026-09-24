@@ -88,8 +88,9 @@ public sealed partial class MvcStructureValidator
         {
             foreach (Match reference in StaticReferenceRegex().Matches(view.Content))
             {
-                var path = reference.Groups[1].Value.TrimStart('~', '/');
-                if (path.Length == 0 || path.Contains('@') || path.StartsWith("http", StringComparison.OrdinalIgnoreCase)) continue;
+                var referenceValue = reference.Groups[1].Value.Trim();
+                if (IsExternalOrNonFileReference(referenceValue)) continue;
+                var path = referenceValue.TrimStart('~', '/');
                 AddIf(issues, !staticPaths.Contains(path), "MVC112", $"Referenced static asset was not found: {path}", view.Path, "warning");
             }
         }
@@ -120,6 +121,12 @@ public sealed partial class MvcStructureValidator
     private static bool IsStaticAsset(GeneratedFile file) =>
         file.Path.Replace('\\', '/').Contains("/wwwroot/", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsExternalOrNonFileReference(string value) =>
+        value.Length == 0 ||
+        value.Contains('@') ||
+        value.StartsWith("//", StringComparison.Ordinal) ||
+        UriSchemeRegex().IsMatch(value);
+
     private static void AddIf(List<BuildDiagnostic> issues, bool condition, string code, string message,
         string? file = null, string severity = "error")
     {
@@ -140,6 +147,9 @@ public sealed partial class MvcStructureValidator
 
     [GeneratedRegex(@"(?:src|href)\s*=\s*[\""']([^\""'#?]+)", RegexOptions.IgnoreCase)]
     private static partial Regex StaticReferenceRegex();
+
+    [GeneratedRegex(@"^[a-z][a-z0-9+.-]*:", RegexOptions.IgnoreCase)]
+    private static partial Regex UriSchemeRegex();
 
     [GeneratedRegex(@"(?m)^\s*@model\s+([^\s]+)")]
     private static partial Regex ModelDirectiveRegex();
